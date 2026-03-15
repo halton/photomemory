@@ -441,7 +441,18 @@ async function checkAuth() {
         startPollApproval();
       } else if (sd.status === 'approved') {
         localStorage.setItem('pm_token', sd.token);
-        showLoginPanel('loginApproved');
+        // 自动用 token 登录，不需要用户再手动输入
+        const lr = await fetch(`${API}/login`, {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({device_id: did, token: sd.token}),
+          credentials: 'include',
+        });
+        if (lr.ok) {
+          hideLoginOverlay();
+          return true;
+        }
+        showLoginPanel('loginApproved');  // 自动登录失败才显示输入框
       } else if (sd.status === 'revoked') {
         document.getElementById('requestError').textContent = '此设备已被吊销，请联系管理员';
         document.getElementById('requestError').style.display = 'block';
@@ -467,6 +478,14 @@ function startPollApproval() {
     if (d.status === 'approved') {
       localStorage.setItem('pm_token', d.token);
       clearInterval(_pollTimer); _pollTimer = null;
+      // 自动登录
+      const lr = await fetch(`${API}/login`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({device_id: did, token: d.token}),
+        credentials: 'include',
+      });
+      if (lr.ok) { hideLoginOverlay(); init(); return; }
       showLoginPanel('loginApproved');
     } else if (d.status === 'revoked') {
       clearInterval(_pollTimer); _pollTimer = null;
