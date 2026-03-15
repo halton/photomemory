@@ -389,6 +389,11 @@ let renamePersonId = null;
 // ── Device Pairing Auth ───────────────────────────────────
 
 function getOrCreateDeviceId() {
+  // 只读取，不自动创建——申请配对时才生成并保存
+  return localStorage.getItem('pm_device_id') || null;
+}
+
+function ensureDeviceId() {
   let did = localStorage.getItem('pm_device_id');
   if (!did) {
     did = 'web-' + crypto.randomUUID();
@@ -419,9 +424,12 @@ async function checkAuth() {
       if (_pollTimer) { clearInterval(_pollTimer); _pollTimer = null; }
       return true;
     }
-    // 未认证 — 检查本设备是否已在 pending/approved
     if (d.mode === 'pairing') {
-      const did = getOrCreateDeviceId();
+      const did = getOrCreateDeviceId();  // 可能为 null（首次）
+      if (!did) {
+        showLoginPanel('loginRequest');
+        return false;
+      }
       const s = await fetch(`${API}/pair/status?device_id=${encodeURIComponent(did)}`);
       const sd = await s.json();
       if (sd.status === 'pending') {
@@ -466,7 +474,7 @@ function startPollApproval() {
 async function submitPairRequest() {
   const name = document.getElementById('deviceNameInput').value.trim()
     || navigator.userAgent.slice(0, 30);
-  const did = getOrCreateDeviceId();
+  const did = ensureDeviceId();  // 申请时才确定 device_id
   const errEl = document.getElementById('requestError');
   errEl.style.display = 'none';
   const r = await fetch(`${API}/pair/request`, {
