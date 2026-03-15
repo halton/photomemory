@@ -199,7 +199,7 @@
   .modal-actions { display: flex; gap: 8px; justify-content: flex-end; }
 
   /* Login overlay */
-  .login-overlay { display: flex; position: fixed; inset: 0;
+  .login-overlay { display: none; position: fixed; inset: 0;
                    background: #0f0f0f; z-index: 9999;
                    align-items: center; justify-content: center; }
   .login-overlay.show { display: flex; }
@@ -329,7 +329,7 @@
 </div>
 
 <!-- Login / Pairing Overlay -->
-<div class="login-overlay" id="loginOverlay">
+<div class="login-overlay show" id="loginOverlay">
 
   <!-- 等待审批状态 -->
   <div class="login-box" id="loginPending" style="display:none">
@@ -436,6 +436,8 @@ async function checkAuth() {
         if (_pollTimer) { clearInterval(_pollTimer); _pollTimer = null; }
         return true;
       }
+      // token 无效（revoked/expired），清除本地凭证
+      localStorage.removeItem('pm_token');
     }
 
     // 没有 token 或验证失败：走配对流程
