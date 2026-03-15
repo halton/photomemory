@@ -116,20 +116,34 @@ def detect_faces(db_path: str, limit=None):
             print(f"  进度: {i+1}/{len(rows)}，已发现 {total_faces} 张人脸")
 
         try:
-            img = cv2.imread(photo_path)
-            if img is None:
-                # 尝试用 PIL 转换（HEIC等格式）
-                pil_img = Image.open(photo_path).convert("RGB")
-                img = cv2.cvtColor(np.array(pil_img), cv2.COLOR_RGB2BGR)
+            # 用 PIL 先做 EXIF 旋转，再转 cv2（确保检测坐标和显示方向一致）
+            from PIL import ImageOps
+            pil_img = ImageOps.exif_transpose(Image.open(photo_path).convert("RGB"))
+            img = cv2.cvtColor(np.array(pil_img), cv2.COLOR_RGB2BGR)
 
             faces = app.get(img)
         except Exception as e:
             continue
 
         for face in faces:
-            if face.det_score < 0.5:
+            if face.det_score < 0.85:
                 continue
             bbox = face.bbox.tolist()
+
+            # 人脸区域亮度过滤：跳过极暗裁剪区域（演出/夜景误检）
+            x1, y1, x2, y2 = [max(0, int(v)) for v in bbox]
+            h_img, w_img = img.shape[:2]
+            x2 = min(w_img, x2); y2 = min(h_img, y2)
+            if x2 > x1 and y2 > y1:
+                face_region = cv2.cvtColor(img[y1:y2, x1:x2], cv2.COLOR_BGR2GRAY)
+                if face_region.mean() < 30:  # 极暗区域，跳过
+                    continue
+
+            # 人脸区域最小尺寸过滤（太小的检测不可靠）
+            face_w = bbox[2] - bbox[0]
+            face_h = bbox[3] - bbox[1]
+            if face_w < 50 or face_h < 50:
+                continue
             embedding = face.embedding.astype(np.float32).tobytes()
             landmark = face.kps.tolist() if face.kps is not None else None
 

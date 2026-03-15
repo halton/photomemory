@@ -615,7 +615,10 @@ def list_persons():
     rows = conn.execute("""
         SELECT p.id, p.name, p.alias, p.face_count,
                MIN(f.photo_path) as sample_photo,
-               MIN(f.id) as sample_face_id
+               -- 选 det_score 最高的脸作为代表头像
+               (SELECT f2.id FROM faces f2
+                WHERE f2.person_id = p.id
+                ORDER BY f2.det_score DESC LIMIT 1) as sample_face_id
         FROM persons p
         LEFT JOIN faces f ON f.person_id = p.id
         GROUP BY p.id
@@ -633,6 +636,31 @@ def list_persons():
             "thumb_url": f"/api/face_thumb/{r['sample_face_id']}" if r["sample_face_id"] else None,
         })
     return jsonify({"persons": results})
+
+
+@app.route("/api/persons/<int:person_id>/photos")
+@require_auth
+def person_photos(person_id):
+    """返回某个人物的所有照片（带缩略图）"""
+    conn = get_db()
+    rows = conn.execute("""
+        SELECT DISTINCT p.id, p.path, p.taken_at, p.gps_city
+        FROM photos p
+        JOIN faces f ON f.photo_id = p.id
+        WHERE f.person_id = ?
+        ORDER BY p.taken_at DESC
+    """, (person_id,)).fetchall()
+    conn.close()
+    results = []
+    for r in rows:
+        results.append({
+            "id": r["id"],
+            "thumb_url": f"/api/thumb/{r['id']}",
+            "photo_url": f"/api/photo/{r['id']}",
+            "taken_at": r["taken_at"],
+            "city": r["gps_city"],
+        })
+    return jsonify({"photos": results, "total": len(results)})
 
 
 @app.route("/api/persons/<int:person_id>", methods=["PATCH"])
@@ -653,26 +681,58 @@ def update_person(person_id):
 @app.route("/api/face_thumb/<int:face_id>")
 def face_thumbnail(face_id):
     conn = get_db()
-    row = conn.execute("SELECT photo_path, bbox FROM faces WHERE id=?", (face_id,)).fetchone()
+    row = conn.execute("SELECT photo_path, bbox, person_id FROM faces WHERE id=?", (face_id,)).fetchone()
     conn.close()
     if not row:
         abort(404)
 
-    try:
-        img = Image.open(row["photo_path"])
-        bbox = json.loads(row["bbox"])
+    def crop_face(photo_path, bbox_json, pad=30):
+        from PIL import ImageOps
+        img = ImageOps.exif_transpose(Image.open(photo_path))  # 先旋转（与 phase2 检测一致）
+        bbox = json.loads(bbox_json)
         x1, y1, x2, y2 = [int(v) for v in bbox]
-        pad = 20
         w, h = img.size
         x1 = max(0, x1-pad); y1 = max(0, y1-pad)
         x2 = min(w, x2+pad); y2 = min(h, y2+pad)
         face = img.crop((x1, y1, x2, y2))
+        return face
+
+    try:
+        face = crop_face(row["photo_path"], row["bbox"])
+
+        # 亮度检测：若太暗，从同人物其他脸中找更亮的
+        import statistics
+        thumb_check = face.copy(); thumb_check.thumbnail((50, 50))
+        brightness = statistics.mean(thumb_check.convert('L').getdata())
+
+        if brightness < 40 and row["person_id"]:
+            conn2 = get_db()
+            others = conn2.execute(
+                "SELECT photo_path, bbox FROM faces WHERE person_id=? AND id!=? ORDER BY det_score DESC LIMIT 10",
+                (row["person_id"], face_id)
+            ).fetchall()
+            conn2.close()
+            best_face, best_brightness = face, brightness
+            for other in others:
+                try:
+                    f2 = crop_face(other["photo_path"], other["bbox"])
+                    t2 = f2.copy(); t2.thumbnail((50,50))
+                    b2 = statistics.mean(t2.convert('L').getdata())
+                    if b2 > best_brightness:
+                        best_brightness = b2
+                        best_face = f2
+                        if b2 > 60:  # 够亮就停
+                            break
+                except Exception:
+                    continue
+            face = best_face
+
         face.thumbnail((150, 150))
         buf = io.BytesIO()
         face.convert("RGB").save(buf, "JPEG", quality=90)
         buf.seek(0)
         return send_file(buf, mimetype="image/jpeg")
-    except Exception:
+    except Exception as e:
         abort(500)
 
 

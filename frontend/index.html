@@ -175,6 +175,44 @@
   .person-card .pedit { margin-top: 8px; font-size: 11px; color: #6366f1;
                         display: none; }
   .person-card:hover .pedit { display: block; }
+  .person-card { cursor: pointer; }
+
+  /* Person Browse Modal */
+  .person-browse-box {
+    background: #1a1a1a; border: 1px solid #2a2a2a; border-radius: 16px;
+    width: 90vw; max-width: 860px; max-height: 85vh;
+    display: flex; flex-direction: column; overflow: hidden;
+  }
+  .pb-header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 20px 24px; border-bottom: 1px solid #2a2a2a;
+    gap: 16px;
+  }
+  .pb-header > div:first-child { display: flex; align-items: center; gap: 16px; }
+  .pb-avatar-wrap { flex-shrink: 0; }
+  .pb-grid {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+    gap: 8px; padding: 16px; overflow-y: auto; flex: 1;
+  }
+  .pb-grid-item {
+    position: relative; aspect-ratio: 1; border-radius: 8px; overflow: hidden;
+    cursor: pointer; background: #111;
+  }
+  .pb-grid-item img { width: 100%; height: 100%; object-fit: cover; }
+  .pb-grid-item .pb-date {
+    position: absolute; bottom: 0; left: 0; right: 0;
+    background: linear-gradient(transparent, rgba(0,0,0,0.7));
+    color: #ccc; font-size: 10px; padding: 4px 6px; text-align: center;
+  }
+  .pb-grid-item:hover img { transform: scale(1.05); transition: transform 0.2s; }
+  .pb-footer {
+    display: flex; gap: 10px; padding: 16px 24px; border-top: 1px solid #2a2a2a;
+  }
+  .pb-footer input {
+    flex: 1; background: #111; border: 1px solid #333; border-radius: 8px;
+    color: #e0e0e0; padding: 8px 14px; font-size: 14px;
+  }
+  .pb-footer input:focus { outline: none; border-color: #6366f1; }
 
   /* Empty state */
   .empty { text-align: center; padding: 60px 20px; color: #444; }
@@ -372,6 +410,29 @@
     <div class="modal-actions">
       <button class="btn secondary" onclick="closeModal()">取消</button>
       <button class="btn" onclick="submitRename()">保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- 人物照片浏览 Modal -->
+<div class="modal-backdrop" id="personBrowseModal" onclick="closePersonBrowse(event)">
+  <div class="person-browse-box" onclick="event.stopPropagation()">
+    <div class="pb-header">
+      <div>
+        <div class="pb-avatar-wrap">
+          <img id="pbAvatar" src="" style="width:64px;height:64px;border-radius:50%;object-fit:cover;">
+        </div>
+        <div>
+          <div id="pbName" style="font-size:18px;font-weight:700;color:#fff;margin-bottom:2px">未命名</div>
+          <div id="pbCount" style="font-size:12px;color:#888"></div>
+        </div>
+      </div>
+      <button class="btn secondary" onclick="closePersonBrowse()" style="padding:6px 14px">✕ 关闭</button>
+    </div>
+    <div id="pbGrid" class="pb-grid"></div>
+    <div class="pb-footer">
+      <input type="text" id="pbNameInput" placeholder="输入姓名，按回车保存" />
+      <button class="btn" onclick="submitPersonBrowseName()">保存命名</button>
     </div>
   </div>
 </div>
@@ -898,16 +959,82 @@ async function loadPersonsView() {
            onerror="this.style.background='#333';this.src=''">
       <div class="pname">${p.name || '未命名'}</div>
       <div class="pcount">${p.face_count} 张照片</div>
-      <div class="pedit" onclick="openRename(${p.id}, '${p.name||''}', event)">✏️ 命名</div>`;
-    if (p.name) {
-      card.querySelector('.pname').onclick = (e) => {
-        e.stopPropagation();
-        filterByPerson(p.name);
-        showView('photos');
-      };
-    }
+      <div class="pedit">✏️ 点击命名 / 浏览</div>`;
+    card.onclick = () => openPersonBrowse(p);
     grid.appendChild(card);
   });
+}
+
+// ── Person Browse Modal ───────────────────────────────────
+
+let _pbPersonId = null;
+
+async function openPersonBrowse(p) {
+  _pbPersonId = p.id;
+  document.getElementById('pbName').textContent = p.name || '未命名';
+  document.getElementById('pbCount').textContent = `${p.face_count} 张照片`;
+  document.getElementById('pbNameInput').value = p.name || '';
+  const av = document.getElementById('pbAvatar');
+  av.src = p.thumb_url ? authUrl(p.thumb_url) : '';
+
+  document.getElementById('personBrowseModal').classList.add('open');
+  document.getElementById('pbGrid').innerHTML = '<div style="color:#666;padding:20px">加载中...</div>';
+
+  const r = await apiFetch(`/persons/${p.id}/photos`).then(r => r.json());
+  const grid = document.getElementById('pbGrid');
+  grid.innerHTML = '';
+  if (!r.photos || r.photos.length === 0) {
+    grid.innerHTML = '<div style="color:#666">暂无照片</div>';
+    return;
+  }
+  r.photos.forEach(ph => {
+    const item = document.createElement('div');
+    item.className = 'pb-grid-item';
+    const date = ph.taken_at ? ph.taken_at.slice(0,10) : '';
+    item.innerHTML = `
+      <img src="${authUrl(ph.thumb_url || ph.photo_url)}" loading="lazy"
+           onerror="this.style.background='#333'">
+      ${date ? `<div class="pb-date">${date}</div>` : ''}`;
+    item.onclick = () => {
+      // 跳到主界面该照片（找到对应 index 打开灯箱）
+      filterByPersonId(p.id, ph.id);
+    };
+    grid.appendChild(item);
+  });
+  document.getElementById('pbNameInput').focus();
+}
+
+function closePersonBrowse(e) {
+  if (e && e.target !== document.getElementById('personBrowseModal')) return;
+  document.getElementById('personBrowseModal').classList.remove('open');
+}
+
+async function submitPersonBrowseName() {
+  const name = document.getElementById('pbNameInput').value.trim();
+  if (!name || !_pbPersonId) return;
+  await apiFetch(`/persons/${_pbPersonId}`, {
+    method: 'PATCH',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({name}),
+  });
+  document.getElementById('pbName').textContent = name;
+  document.getElementById('personBrowseModal').classList.remove('open');
+  loadPersonsView();
+  loadPersonsSidebar();
+}
+
+// 按 person_id 过滤，并跳到指定照片
+async function filterByPersonId(personId, targetPhotoId) {
+  closePersonBrowse();
+  // 找人物名再搜索
+  const r = await apiFetch(`/persons`).then(r => r.json());
+  const p = r.persons.find(x => x.id === personId);
+  if (p && p.name) {
+    filterByPerson(p.name);
+  } else {
+    // 未命名人物，直接搜 person_id（后端需支持，fallback 到展示全部）
+    showView('photos');
+  }
 }
 
 // ── Rename ────────────────────────────────────────────────
@@ -939,6 +1066,9 @@ async function submitRename() {
 
 document.getElementById('searchInput').addEventListener('keydown', e => {
   if (e.key === 'Enter') doSearch();
+});
+document.getElementById('pbNameInput').addEventListener('keydown', e => {
+  if (e.key === 'Enter') submitPersonBrowseName();
 });
 </script>
 </body>
