@@ -419,15 +419,34 @@ let _pollTimer = null;
 
 async function checkAuth() {
   try {
-    const r = await fetch(`${API}/auth_check`);
-    const d = await r.json();
-    if (d.authenticated) {
+    const did = localStorage.getItem('pm_device_id');
+    const token = localStorage.getItem('pm_token');
+
+    // 如果本地有 token，先尝试直接验证
+    if (did && token) {
+      const r = await fetch(`${API}/auth_check`, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'X-Device-ID': did,
+        }
+      });
+      const d = await r.json();
+      if (d.authenticated) {
+        hideLoginOverlay();
+        if (_pollTimer) { clearInterval(_pollTimer); _pollTimer = null; }
+        return true;
+      }
+    }
+
+    // 没有 token 或验证失败：走配对流程
+    const r2 = await fetch(`${API}/auth_check`);
+    const d2 = await r2.json();
+    if (d2.authenticated) {
+      // 开放模式
       hideLoginOverlay();
-      if (_pollTimer) { clearInterval(_pollTimer); _pollTimer = null; }
       return true;
     }
-    if (d.mode === 'pairing') {
-      const did = getOrCreateDeviceId();  // 可能为 null（首次）
+    if (d2.mode === 'pairing') {
       if (!did) {
         showLoginPanel('loginRequest');
         return false;
@@ -441,18 +460,8 @@ async function checkAuth() {
         startPollApproval();
       } else if (sd.status === 'approved') {
         localStorage.setItem('pm_token', sd.token);
-        // 自动用 token 登录，不需要用户再手动输入
-        const lr = await fetch(`${API}/login`, {
-          method: 'POST',
-          headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({device_id: did, token: sd.token}),
-          credentials: 'include',
-        });
-        if (lr.ok) {
-          hideLoginOverlay();
-          return true;
-        }
-        showLoginPanel('loginApproved');  // 自动登录失败才显示输入框
+        hideLoginOverlay();
+        return true;
       } else if (sd.status === 'revoked') {
         document.getElementById('requestError').textContent = '此设备已被吊销，请联系管理员';
         document.getElementById('requestError').style.display = 'block';
@@ -463,7 +472,6 @@ async function checkAuth() {
     }
     return false;
   } catch(e) {
-    // API 不可达时也显示登录页，不放行
     showLoginPanel('loginRequest');
     return false;
   }
@@ -478,15 +486,8 @@ function startPollApproval() {
     if (d.status === 'approved') {
       localStorage.setItem('pm_token', d.token);
       clearInterval(_pollTimer); _pollTimer = null;
-      // 自动登录
-      const lr = await fetch(`${API}/login`, {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({device_id: did, token: d.token}),
-        credentials: 'include',
-      });
-      if (lr.ok) { hideLoginOverlay(); init(); return; }
-      showLoginPanel('loginApproved');
+      hideLoginOverlay();
+      init();
     } else if (d.status === 'revoked') {
       clearInterval(_pollTimer); _pollTimer = null;
       showLoginPanel('loginRequest');
@@ -530,12 +531,15 @@ async function submitLogin() {
   const did = getOrCreateDeviceId();
   const errEl = document.getElementById('loginError');
   errEl.style.display = 'none';
-  const r = await apiFetch(`/login`, {
-    method: 'POST',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({device_id: did, token}),
+  // Verify token directly via auth_check with Bearer header
+  const r = await fetch(`${API}/auth_check`, {
+    headers: {
+      'Authorization': `Bearer ${token}`,
+      'X-Device-ID': did,
+    }
   });
-  if (r.ok) {
+  const d = await r.json();
+  if (d.authenticated) {
     localStorage.setItem('pm_token', token);
     hideLoginOverlay();
     init();

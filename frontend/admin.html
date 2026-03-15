@@ -1,0 +1,308 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PhotoMemory 管理</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+         background: #0f0f0f; color: #e0e0e0; min-height: 100vh; }
+
+  header { background: #1a1a1a; border-bottom: 1px solid #2a2a2a;
+           padding: 14px 24px; display: flex; align-items: center; gap: 16px; }
+  header h1 { font-size: 18px; font-weight: 600; color: #fff; }
+  header h1 span { color: #6366f1; }
+  header .badge { background: #ef4444; color: #fff; font-size: 11px;
+                  padding: 2px 8px; border-radius: 10px; font-weight: 600; }
+  header .badge.connected { background: #22c55e; }
+
+  .connect-bar { background: #141414; border-bottom: 1px solid #2a2a2a;
+                 padding: 12px 24px; display: flex; gap: 8px; align-items: center; }
+  .connect-bar input { background: #2a2a2a; border: 1px solid #3a3a3a;
+                        border-radius: 8px; padding: 8px 14px; color: #e0e0e0;
+                        font-size: 13px; outline: none; width: 360px;
+                        font-family: monospace; }
+  .connect-bar input:focus { border-color: #6366f1; }
+  .connect-bar .error { color: #ef4444; font-size: 13px; }
+
+  .btn { background: #6366f1; color: #fff; border: none; border-radius: 8px;
+         padding: 8px 16px; cursor: pointer; font-size: 14px; white-space: nowrap; }
+  .btn:hover { background: #5254cc; }
+  .btn.danger { background: #2a2a2a; color: #ef4444; border: 1px solid #3a2a2a; }
+  .btn.danger:hover { background: #3a1a1a; }
+  .btn.approve { background: #22c55e; }
+  .btn.approve:hover { background: #16a34a; }
+  .btn.sm { padding: 5px 12px; font-size: 12px; border-radius: 6px; }
+
+  .content { max-width: 960px; margin: 0 auto; padding: 24px; }
+
+  .section { margin-bottom: 32px; }
+  .section-header { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; }
+  .section-title { font-size: 16px; font-weight: 600; color: #fff; }
+  .section-count { background: #2a2a2a; border-radius: 10px; padding: 2px 8px;
+                   font-size: 12px; color: #888; }
+  .section-refresh { margin-left: auto; font-size: 12px; color: #555; }
+
+  table { width: 100%; border-collapse: collapse; }
+  th { text-align: left; font-size: 11px; font-weight: 600; color: #555;
+       text-transform: uppercase; letter-spacing: 0.5px;
+       padding: 8px 12px; border-bottom: 1px solid #2a2a2a; }
+  td { padding: 10px 12px; border-bottom: 1px solid #1e1e1e;
+       font-size: 13px; color: #ccc; vertical-align: middle; }
+  tr:last-child td { border-bottom: none; }
+  tr:hover td { background: #161616; }
+
+  .device-name { font-weight: 500; color: #e0e0e0; }
+  .device-id { font-family: monospace; font-size: 11px; color: #555; }
+  .date-str { color: #666; font-size: 12px; }
+  .ip-str { font-family: monospace; font-size: 12px; color: #888; }
+  .status-active { color: #22c55e; font-size: 12px; }
+  .status-revoked { color: #ef4444; font-size: 12px; }
+
+  .empty-row td { text-align: center; padding: 32px; color: #444; }
+
+  .auto-refresh-note { font-size: 11px; color: #444; margin-top: 6px; }
+
+  .toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
+           background: #22c55e; color: #fff; padding: 10px 20px; border-radius: 8px;
+           font-size: 14px; display: none; z-index: 9999; }
+  .toast.error { background: #ef4444; }
+  .toast.show { display: block; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Photo<span>Memory</span> <span style="color:#666;font-weight:400">管理</span></h1>
+  <span class="badge" id="connBadge">未连接</span>
+  <a href="/" style="margin-left:auto;font-size:13px;color:#666;text-decoration:none">← 返回主页</a>
+</header>
+
+<div class="connect-bar">
+  <input type="password" id="adminTokenInput" placeholder="输入 Admin Token..."
+         onkeydown="if(event.key==='Enter') connect()" />
+  <button class="btn" onclick="connect()">连接</button>
+  <span class="error" id="connectError"></span>
+</div>
+
+<div class="content">
+
+  <div class="section">
+    <div class="section-header">
+      <span class="section-title">⏳ 待审批</span>
+      <span class="section-count" id="pendingCount">0</span>
+      <span class="section-refresh" id="refreshNote"></span>
+    </div>
+    <table>
+      <thead>
+        <tr>
+          <th>设备名</th>
+          <th>Device ID</th>
+          <th>申请时间</th>
+          <th>IP</th>
+          <th>操作</th>
+        </tr>
+      </thead>
+      <tbody id="pendingBody">
+        <tr class="empty-row"><td colspan="5">请先连接</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="section">
+    <div class="section-header">
+      <span class="section-title">✅ 已配对设备</span>
+      <span class="section-count" id="pairedCount">0</span>
+    </div>
+    <table>
+      <thead>
+        <tr>
+          <th>设备名</th>
+          <th>Device ID</th>
+          <th>配对时间</th>
+          <th>状态</th>
+          <th>操作</th>
+        </tr>
+      </thead>
+      <tbody id="pairedBody">
+        <tr class="empty-row"><td colspan="5">请先连接</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const API = (location.hostname === 'localhost' || location.hostname === '127.0.0.1')
+  ? `${location.protocol}//${location.hostname}:8765/api`
+  : `${location.protocol}//${location.host}/api`;
+
+let adminToken = localStorage.getItem('pm_admin_token') || '';
+let connected = false;
+let refreshTimer = null;
+
+if (adminToken) {
+  document.getElementById('adminTokenInput').value = adminToken;
+  connect();
+}
+
+async function connect() {
+  const token = document.getElementById('adminTokenInput').value.trim();
+  if (!token) return;
+  const errEl = document.getElementById('connectError');
+  errEl.textContent = '';
+
+  const r = await fetch(`${API}/pair/list`, {
+    headers: { 'Authorization': `Bearer ${token}` }
+  });
+  if (r.ok) {
+    adminToken = token;
+    localStorage.setItem('pm_admin_token', token);
+    connected = true;
+    document.getElementById('connBadge').textContent = '已连接';
+    document.getElementById('connBadge').className = 'badge connected';
+    const data = await r.json();
+    renderAll(data);
+    startAutoRefresh();
+  } else {
+    connected = false;
+    document.getElementById('connBadge').textContent = '未连接';
+    document.getElementById('connBadge').className = 'badge';
+    errEl.textContent = r.status === 403 ? 'Token 不正确' : '连接失败: ' + r.status;
+  }
+}
+
+async function loadList() {
+  if (!connected || !adminToken) return;
+  const r = await fetch(`${API}/pair/list`, {
+    headers: { 'Authorization': `Bearer ${adminToken}` }
+  });
+  if (r.ok) {
+    const data = await r.json();
+    renderAll(data);
+  }
+}
+
+function renderAll(data) {
+  renderPending(data.pending || []);
+  renderPaired(data.paired || []);
+}
+
+function renderPending(list) {
+  document.getElementById('pendingCount').textContent = list.length;
+  const tbody = document.getElementById('pendingBody');
+  if (list.length === 0) {
+    tbody.innerHTML = '<tr class="empty-row"><td colspan="5" style="color:#444">暂无待审批设备</td></tr>';
+    return;
+  }
+  tbody.innerHTML = list.map(d => `
+    <tr>
+      <td><span class="device-name">${esc(d.device_name)}</span></td>
+      <td><span class="device-id">${esc(d.device_id)}</span></td>
+      <td><span class="date-str">${fmt(d.requested_at)}</span></td>
+      <td><span class="ip-str">${esc(d.ip || '-')}</span></td>
+      <td style="display:flex;gap:6px">
+        <button class="btn approve sm" onclick="approve('${esc(d.device_id)}')">批准</button>
+        <button class="btn danger sm" onclick="reject('${esc(d.device_id)}')">拒绝</button>
+      </td>
+    </tr>
+  `).join('');
+}
+
+function renderPaired(list) {
+  document.getElementById('pairedCount').textContent = list.length;
+  const tbody = document.getElementById('pairedBody');
+  if (list.length === 0) {
+    tbody.innerHTML = '<tr class="empty-row"><td colspan="5" style="color:#444">暂无已配对设备</td></tr>';
+    return;
+  }
+  tbody.innerHTML = list.map(d => `
+    <tr>
+      <td><span class="device-name">${esc(d.device_name)}</span></td>
+      <td><span class="device-id">${shortId(d.device_id)}</span></td>
+      <td><span class="date-str">${fmt(d.approved_at)}</span></td>
+      <td><span class="${d.status === 'active' ? 'status-active' : 'status-revoked'}">${d.status === 'active' ? '✓ 活跃' : '✗ 已吊销'}</span></td>
+      <td>
+        ${d.status === 'active'
+          ? `<button class="btn danger sm" onclick="revoke('${esc(d.device_id)}', '${esc(d.device_name)}')">吊销</button>`
+          : '<span style="color:#444;font-size:12px">已吊销</span>'}
+      </td>
+    </tr>
+  `).join('');
+}
+
+async function approve(deviceId) {
+  const r = await fetch(`${API}/pair/approve`, {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${adminToken}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ device_id: deviceId }),
+  });
+  if (r.ok) { showToast('✅ 已批准'); loadList(); }
+  else showToast('操作失败: ' + r.status, true);
+}
+
+async function reject(deviceId) {
+  const r = await fetch(`${API}/pair/reject`, {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${adminToken}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ device_id: deviceId }),
+  });
+  if (r.ok) { showToast('🗑 已拒绝'); loadList(); }
+  else showToast('操作失败: ' + r.status, true);
+}
+
+async function revoke(deviceId, name) {
+  if (!confirm(`确认吊销设备「${name}」？`)) return;
+  const r = await fetch(`${API}/pair/revoke`, {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${adminToken}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ device_id: deviceId }),
+  });
+  if (r.ok) { showToast('🔒 已吊销'); loadList(); }
+  else showToast('操作失败: ' + r.status, true);
+}
+
+function startAutoRefresh() {
+  if (refreshTimer) clearInterval(refreshTimer);
+  let countdown = 5;
+  const note = document.getElementById('refreshNote');
+  const tick = () => {
+    note.textContent = `${countdown}s 后刷新`;
+    countdown--;
+    if (countdown < 0) {
+      loadList();
+      countdown = 5;
+    }
+  };
+  tick();
+  refreshTimer = setInterval(tick, 1000);
+}
+
+function showToast(msg, isErr = false) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.className = 'toast show' + (isErr ? ' error' : '');
+  setTimeout(() => { t.className = 'toast'; }, 2500);
+}
+
+function esc(s) {
+  return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function shortId(id) {
+  if (!id) return '-';
+  return id.length > 20 ? id.slice(0, 10) + '…' + id.slice(-6) : id;
+}
+
+function fmt(iso) {
+  if (!iso) return '-';
+  try {
+    return new Date(iso).toLocaleString('zh-CN', {hour12: false});
+  } catch { return iso; }
+}
+</script>
+</body>
+</html>

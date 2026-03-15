@@ -71,18 +71,9 @@ def _check_auth():
     if not PAIRING_ENABLED:
         return True, "open"
 
-    # 1. Session cookie（浏览器登录后免重输）
-    sid = request.cookies.get(SESSION_COOKIE, "")
-    if sid and sid in _sessions:
-        did, expiry = _sessions[sid]
-        if datetime.now() < expiry:
-            return True, did
-        else:
-            _sessions.pop(sid, None)
-
-    # 2. Bearer token + device_id（API / 原生客户端）
+    # 1. Bearer token + device_id（优先，API / 原生客户端 / 浏览器）
     auth = request.headers.get("Authorization", "")
-    device_id = _get_request_device_id()
+    device_id = request.headers.get("X-Device-ID", "") or request.args.get("device_id", "")
     if auth.startswith("Bearer ") and device_id:
         token = auth[7:]
         paired = _devices["paired"].get(device_id)
@@ -90,7 +81,7 @@ def _check_auth():
             if secrets.compare_digest(token, paired["token"]):
                 return True, device_id
 
-    # 3. URL query 参数 token + device_id（<img src> 等无法带 header 的场景）
+    # 2. URL query 参数 token + device_id（<img src> 等无法带 header 的场景）
     url_token = request.args.get("_t", "")
     url_did   = request.args.get("_d", "")
     if url_token and url_did:
@@ -273,6 +264,12 @@ def pair_list():
     })
 
 
+@app.route("/admin")
+def admin_page():
+    admin_path = os.path.join(FRONTEND_DIR, "admin.html")
+    return send_file(admin_path)
+
+
 @app.route("/api/auth_check")
 def auth_check():
     ok, device_id = _check_auth()
@@ -285,12 +282,12 @@ def auth_check():
 
 @app.route("/api/login", methods=["POST"])
 def login():
-    """浏览器配对：提交 token+device_id 换取 session cookie"""
+    """保留兼容接口（无状态模式下直接返回 ok）"""
+    if not PAIRING_ENABLED:
+        return jsonify({"ok": True})
     data = request.get_json() or {}
     device_id = data.get("device_id", "").strip()
     token = data.get("token", "").strip()
-    if not PAIRING_ENABLED:
-        return jsonify({"ok": True})
     if not device_id or not token:
         return jsonify({"error": "device_id and token required"}), 400
     paired = _devices["paired"].get(device_id)
@@ -298,15 +295,20 @@ def login():
         return jsonify({"error": "Device not approved"}), 401
     if not secrets.compare_digest(token, paired["token"]):
         return jsonify({"error": "Invalid token"}), 401
-    # 颁发 session cookie
-    sid = secrets.token_urlsafe(32)
-    _sessions[sid] = (device_id, datetime.now() + timedelta(hours=SESSION_TTL_HOURS))
-    resp = make_response(jsonify({"ok": True}))
-    resp.set_cookie(SESSION_COOKIE, sid, max_age=SESSION_TTL_HOURS * 3600,
-                    httponly=True, samesite="Lax")
-    resp.set_cookie("pm_device_id", device_id, max_age=SESSION_TTL_HOURS * 3600,
-                    samesite="Lax")
-    return resp
+    return jsonify({"ok": True})
+
+
+@app.route("/api/pair/reject", methods=["POST"])
+@require_admin
+def pair_reject():
+    """管理员拒绝待审批设备"""
+    data = request.get_json() or {}
+    device_id = data.get("device_id", "").strip()
+    if device_id in _devices["pending"]:
+        _devices["pending"].pop(device_id)
+        _save_devices(_devices)
+        return jsonify({"ok": True})
+    return jsonify({"error": "device not found in pending"}), 404
 
 DB_PATH = None
 
