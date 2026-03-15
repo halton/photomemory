@@ -268,6 +268,20 @@ def pair_list():
 
 @app.route("/admin")
 def admin_page():
+    """管理界面：必须提供 admin token 才能访问页面"""
+    # 支持 URL 参数 ?token=xxx 或 Authorization: Bearer xxx
+    token = request.args.get("token", "") or \
+            request.headers.get("Authorization", "").removeprefix("Bearer ").strip()
+    if not PAIRING_ENABLED or not ADMIN_TOKEN:
+        pass  # 未启用认证时放行
+    elif not token or not secrets.compare_digest(token, ADMIN_TOKEN):
+        return '''<!DOCTYPE html><html><body style="background:#0f0f0f;color:#666;
+            display:flex;align-items:center;justify-content:center;height:100vh;
+            font-family:monospace;flex-direction:column">
+            <div style="font-size:48px">🔒</div>
+            <div style="margin:16px 0;color:#fff">需要管理员权限</div>
+            <div style="font-size:13px">访问 /admin?token=YOUR_ADMIN_TOKEN</div>
+            </body></html>''', 403
     admin_path = os.path.join(FRONTEND_DIR, "admin.html")
     return send_file(admin_path)
 
