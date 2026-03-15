@@ -106,23 +106,58 @@
 
   /* Lightbox */
   .lightbox { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.92);
-              z-index: 999; align-items: center; justify-content: center; }
+              z-index: 999; }
   .lightbox.open { display: flex; }
-  .lightbox-inner { max-width: 90vw; max-height: 90vh; position: relative; }
-  .lightbox-inner img { max-width: 90vw; max-height: 85vh; object-fit: contain;
-                         border-radius: 8px; }
-  .lightbox-info { position: absolute; bottom: -36px; left: 0; right: 0;
-                   text-align: center; font-size: 12px; color: #888; }
-  .lightbox-close { position: absolute; top: -40px; right: 0; background: none;
-                    border: none; color: #aaa; font-size: 24px; cursor: pointer; }
-  .lightbox-close:hover { color: #fff; }
+  .lightbox-main { flex: 1; display: flex; align-items: center; justify-content: center;
+                   position: relative; }
+  .lightbox-inner { max-width: 100%; max-height: 100%; position: relative;
+                    display: flex; align-items: center; justify-content: center; }
+  .lightbox-inner img { max-width: calc(100vw - 340px); max-height: 92vh;
+                         object-fit: contain; border-radius: 6px; }
+  .lightbox-close { position: fixed; top: 16px; right: 16px; background: rgba(0,0,0,0.5);
+                    border: none; color: #aaa; font-size: 20px; cursor: pointer;
+                    width: 36px; height: 36px; border-radius: 50%;
+                    display: flex; align-items: center; justify-content: center; z-index: 1001; }
+  .lightbox-close:hover { color: #fff; background: rgba(99,102,241,0.7); }
   .lightbox-nav { position: absolute; top: 50%; transform: translateY(-50%);
                   background: rgba(0,0,0,0.5); border: none; color: #fff;
                   font-size: 24px; cursor: pointer; padding: 12px 16px;
-                  border-radius: 8px; }
+                  border-radius: 8px; z-index: 1000; }
   .lightbox-nav:hover { background: rgba(99,102,241,0.7); }
-  .lightbox-nav.prev { left: -60px; }
-  .lightbox-nav.next { right: -60px; }
+  .lightbox-nav.prev { left: 12px; }
+  .lightbox-nav.next { right: 12px; }
+
+  /* Lightbox info panel */
+  .lightbox-panel { width: 300px; min-width: 300px; height: 100vh;
+                    background: #141414; border-left: 1px solid #2a2a2a;
+                    overflow-y: auto; padding: 20px 16px; display: flex;
+                    flex-direction: column; gap: 0; }
+  .lb-thumb { width: 100%; border-radius: 8px; margin-bottom: 16px;
+              max-height: 200px; object-fit: cover; }
+  .lb-section { margin-bottom: 16px; }
+  .lb-section-title { font-size: 10px; font-weight: 600; color: #555;
+                       text-transform: uppercase; letter-spacing: 0.5px;
+                       margin-bottom: 8px; }
+  .lb-row { display: flex; gap: 8px; margin-bottom: 6px; font-size: 12px;
+             align-items: flex-start; }
+  .lb-row .icon { width: 16px; text-align: center; flex-shrink: 0;
+                   color: #555; margin-top: 1px; }
+  .lb-row .val { color: #ccc; word-break: break-all; flex: 1; }
+  .lb-row .val.muted { color: #555; }
+  .lb-row .val a { color: #6366f1; text-decoration: none; }
+  .lb-row .val a:hover { text-decoration: underline; }
+  .lb-persons { display: flex; flex-wrap: wrap; gap: 6px; }
+  .lb-person-chip { background: #2a2a2a; border-radius: 20px;
+                     padding: 3px 10px; font-size: 11px; color: #aaa;
+                     cursor: pointer; display: flex; align-items: center; gap: 5px; }
+  .lb-person-chip img { width: 18px; height: 18px; border-radius: 50%; object-fit: cover; }
+  .lb-person-chip:hover { background: #6366f1; color: #fff; }
+  .lb-actions { margin-top: auto; display: flex; gap: 8px; padding-top: 16px;
+                border-top: 1px solid #2a2a2a; }
+  .lb-actions a { flex: 1; background: #2a2a2a; color: #aaa; border: none;
+                   border-radius: 8px; padding: 8px; text-align: center;
+                   font-size: 12px; text-decoration: none; display: block; }
+  .lb-actions a:hover { background: #333; color: #fff; }
 
   /* Persons view */
   .persons-grid { padding: 16px; display: grid;
@@ -232,13 +267,42 @@
 </div>
 
 <!-- Lightbox -->
-<div class="lightbox" id="lightbox" onclick="closeLightbox(event)">
-  <div class="lightbox-inner">
-    <button class="lightbox-close" onclick="closeLightbox()">✕</button>
-    <button class="lightbox-nav prev" onclick="lightboxNav(-1)">‹</button>
-    <img id="lightboxImg" src="" alt="">
-    <button class="lightbox-nav next" onclick="lightboxNav(1)">›</button>
-    <div class="lightbox-info" id="lightboxInfo"></div>
+<div class="lightbox" id="lightbox">
+  <button class="lightbox-close" onclick="closeLightbox()">✕</button>
+  <div class="lightbox-main">
+    <div class="lightbox-inner">
+      <button class="lightbox-nav prev" onclick="lightboxNav(-1)">‹</button>
+      <img id="lightboxImg" src="" alt="">
+      <button class="lightbox-nav next" onclick="lightboxNav(1)">›</button>
+    </div>
+  </div>
+  <!-- 右侧信息面板 -->
+  <div class="lightbox-panel" id="lightboxPanel">
+    <div class="lb-section" id="lbPersons" style="display:none">
+      <div class="lb-section-title">人物</div>
+      <div class="lb-persons" id="lbPersonList"></div>
+    </div>
+    <div class="lb-section">
+      <div class="lb-section-title">照片信息</div>
+      <div class="lb-row"><span class="icon">📄</span><span class="val" id="lbFilename">-</span></div>
+      <div class="lb-row"><span class="icon">📅</span><span class="val" id="lbDate">-</span></div>
+      <div class="lb-row"><span class="icon">📍</span><span class="val" id="lbLocation">-</span></div>
+      <div class="lb-row"><span class="icon">📐</span><span class="val" id="lbSize">-</span></div>
+      <div class="lb-row"><span class="icon">💾</span><span class="val" id="lbFilesize">-</span></div>
+      <div class="lb-row"><span class="icon">🗂️</span><span class="val" id="lbDir">-</span></div>
+    </div>
+    <div class="lb-section" id="lbGpsSection" style="display:none">
+      <div class="lb-section-title">GPS 坐标</div>
+      <div class="lb-row"><span class="icon">🌐</span><span class="val" id="lbGps"></span></div>
+    </div>
+    <div class="lb-section" id="lbFlagsSection" style="display:none">
+      <div class="lb-section-title">标记</div>
+      <div class="lb-row" id="lbFlags"></div>
+    </div>
+    <div class="lb-actions">
+      <a id="lbDownload" href="#" target="_blank">⬇ 原图</a>
+      <a id="lbOpenMaps" href="#" target="_blank" style="display:none">🗺 地图</a>
+    </div>
   </div>
 </div>
 
@@ -408,13 +472,88 @@ function openLightbox(index) {
   document.getElementById('lightbox').classList.add('open');
 }
 
-function updateLightbox() {
+async function updateLightbox() {
   const p = currentResults[lightboxIndex];
   if (!p) return;
+
+  // 图片
   document.getElementById('lightboxImg').src = `${API}/photo/${p.id}`;
-  const date = p.taken_at ? p.taken_at.substring(0, 16).replace(/:/g, p.taken_at.indexOf(':') < 5 ? ':' : '-').replace('T',' ') : '未知时间';
-  document.getElementById('lightboxInfo').textContent =
-    `${p.filename} · ${date}${p.gps_city ? ' · ' + p.gps_city : ''}`;
+
+  // 基础信息
+  document.getElementById('lbFilename').textContent = p.filename || '-';
+
+  // 日期格式化
+  let dateStr = '-';
+  if (p.taken_at) {
+    dateStr = p.taken_at.replace(/^(\d{4}):(\d{2}):(\d{2})/, '$1-$2-$3');
+  }
+  document.getElementById('lbDate').textContent = dateStr;
+
+  // 地点
+  document.getElementById('lbLocation').textContent = p.gps_city || '无位置信息';
+  document.getElementById('lbLocation').className = p.gps_city ? 'val' : 'val muted';
+
+  // GPS
+  if (p.gps_lat && p.gps_lon) {
+    document.getElementById('lbGpsSection').style.display = '';
+    document.getElementById('lbGps').textContent = `${p.gps_lat.toFixed(5)}, ${p.gps_lon.toFixed(5)}`;
+    const mapsEl = document.getElementById('lbOpenMaps');
+    mapsEl.href = `https://maps.apple.com/?ll=${p.gps_lat},${p.gps_lon}`;
+    mapsEl.style.display = '';
+  } else {
+    document.getElementById('lbGpsSection').style.display = 'none';
+    document.getElementById('lbOpenMaps').style.display = 'none';
+  }
+
+  // 尺寸/文件大小
+  document.getElementById('lbSize').textContent =
+    (p.width && p.height) ? `${p.width} × ${p.height}` : '-';
+  document.getElementById('lbFilesize').textContent =
+    p.size ? `${(p.size / 1024 / 1024).toFixed(1)} MB` : '-';
+
+  // 目录
+  document.getElementById('lbDir').textContent = p.dir || '-';
+
+  // 标记（截图/重复）
+  const flags = [];
+  if (p.is_screenshot) flags.push('<span style="color:#eab308">📸 疑似截图</span>');
+  if (p.is_duplicate) flags.push('<span style="color:#ef4444">🔁 重复图片</span>');
+  const flagsSection = document.getElementById('lbFlagsSection');
+  if (flags.length) {
+    flagsSection.style.display = '';
+    document.getElementById('lbFlags').innerHTML = flags.join(' ');
+  } else {
+    flagsSection.style.display = 'none';
+  }
+
+  // 原图链接
+  document.getElementById('lbDownload').href = `${API}/photo/${p.id}`;
+
+  // 人物（异步加载）
+  loadLightboxPersons(p.id);
+}
+
+async function loadLightboxPersons(photoId) {
+  // 通过 photo path 查找该图的人脸人物
+  try {
+    const p = currentResults.find(r => r.id === photoId);
+    if (!p) return;
+    const r = await fetch(`${API}/photo_persons/${photoId}`).then(r => r.json());
+    const personsSection = document.getElementById('lbPersons');
+    const personList = document.getElementById('lbPersonList');
+    if (r.persons && r.persons.length > 0) {
+      personsSection.style.display = '';
+      personList.innerHTML = r.persons.map(person => `
+        <div class="lb-person-chip" onclick="filterByPerson('${person.name}'); closeLightbox();">
+          ${person.thumb_url ? `<img src="${API.replace('/api','')}${person.thumb_url}">` : ''}
+          ${person.name}
+        </div>`).join('');
+    } else {
+      personsSection.style.display = 'none';
+    }
+  } catch(e) {
+    document.getElementById('lbPersons').style.display = 'none';
+  }
 }
 
 function lightboxNav(dir) {
@@ -422,10 +561,8 @@ function lightboxNav(dir) {
   updateLightbox();
 }
 
-function closeLightbox(e) {
-  if (!e || e.target.id === 'lightbox') {
-    document.getElementById('lightbox').classList.remove('open');
-  }
+function closeLightbox() {
+  document.getElementById('lightbox').classList.remove('open');
 }
 
 document.addEventListener('keydown', e => {

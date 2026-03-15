@@ -9,12 +9,38 @@ import io
 import json
 import sqlite3
 import argparse
+import subprocess
+import tempfile
 from pathlib import Path
 from datetime import datetime
 
 from flask import Flask, jsonify, request, send_file, abort
 from flask_cors import CORS
 from PIL import Image
+
+# 中文地名别名映射（英文存储，支持中文搜索）
+CITY_ALIASES = {
+    "北京": ["Beijing", "beijing"],
+    "上海": ["Shanghai", "shanghai"],
+    "广州": ["Guangzhou", "guangzhou"],
+    "深圳": ["Shenzhen", "shenzhen"],
+    "成都": ["Chengdu", "chengdu"],
+    "杭州": ["Hangzhou", "hangzhou"],
+    "武汉": ["Wuhan", "wuhan"],
+    "西安": ["Xi'an", "Xian", "xian"],
+    "南京": ["Nanjing", "nanjing"],
+    "重庆": ["Chongqing", "chongqing"],
+    "天津": ["Tianjin", "tianjin"],
+    "山西": ["Shanxi", "shanxi"],
+    "北京海淀": ["Beijing Haidian", "Haidian"],
+    "北京金融街": ["Beijing Jinrongjie", "Jinrongjie"],
+    "北京景山": ["Beijing Jingshan", "Jingshan"],
+    "江苏": ["Jiangsu", "jiangsu"],
+    "苏州": ["Songling", "Suzhou", "suzhou"],
+    "太原": ["Gutao", "gutao", "Taiyuan"],
+}
+
+VIDEO_EXTS = {'.mov', '.mp4', '.avi', '.mkv', '.m4v', '.3gp'}
 
 FRONTEND_DIR = os.path.join(os.path.dirname(__file__), "..", "frontend")
 app = Flask(__name__, static_folder=FRONTEND_DIR, static_url_path="/")
@@ -113,10 +139,25 @@ def search():
         conditions.append(f"p.path IN ({placeholders})")
         params.extend(list(person_photo_paths))
 
-    # 地点文本搜索（GPS城市字段，未来扩展）
+    # 地点文本搜索（GPS城市字段，支持中文别名）
     if q and not person_name and not _is_person_query(q, c):
-        conditions.append("(p.gps_city LIKE ? OR p.filename LIKE ? OR p.dir_label LIKE ?)")
-        params.extend([f"%{q}%", f"%{q}%", f"%{q}%"])
+        # 展开中文别名为英文关键词
+        search_terms = [q]
+        for cn, aliases in CITY_ALIASES.items():
+            if q in cn or cn in q:
+                search_terms.extend(aliases)
+            for alias in aliases:
+                if q.lower() in alias.lower():
+                    search_terms.append(cn)
+                    break
+        # 去重
+        search_terms = list(dict.fromkeys(search_terms))
+        # 构建多词 OR 条件
+        term_conditions = []
+        for term in search_terms:
+            term_conditions.append("(p.gps_city LIKE ? OR p.filename LIKE ? OR p.dir_label LIKE ?)")
+            params.extend([f"%{term}%", f"%{term}%", f"%{term}%"])
+        conditions.append("(" + " OR ".join(term_conditions) + ")")
 
     where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
     sql = f"""
@@ -181,14 +222,21 @@ def thumbnail(photo_id):
         abort(404)
 
     size = int(request.args.get("size", 300))
+    ext = Path(path).suffix.lower()
+
+    # 视频：用 ffmpeg 截取第1秒帧
+    if ext in VIDEO_EXTS:
+        return _video_thumbnail(path, size)
+
+    # 图片
     try:
         img = Image.open(path)
         img.thumbnail((size, size), Image.LANCZOS)
         # 处理 EXIF 旋转
         try:
-            from PIL.ExifTags import TAGS
             exif = img._getexif()
             if exif:
+                from PIL.ExifTags import TAGS
                 for tag, val in exif.items():
                     if TAGS.get(tag) == "Orientation":
                         rotations = {3: 180, 6: 270, 8: 90}
@@ -196,13 +244,64 @@ def thumbnail(photo_id):
                             img = img.rotate(rotations[val], expand=True)
         except Exception:
             pass
-
         buf = io.BytesIO()
         img.convert("RGB").save(buf, "JPEG", quality=85)
         buf.seek(0)
         return send_file(buf, mimetype="image/jpeg")
-    except Exception as e:
+    except Exception:
         abort(500)
+
+
+def _video_thumbnail(path: str, size: int):
+    """用 ffmpeg 截取视频第1秒画面作为缩略图"""
+    ffmpeg = _find_ffmpeg()
+    if not ffmpeg:
+        # ffmpeg 不可用时返回占位图
+        return _placeholder_thumb(size, "🎬")
+
+    try:
+        with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as tmp:
+            tmp_path = tmp.name
+
+        result = subprocess.run([
+            ffmpeg, "-y", "-ss", "00:00:01",
+            "-i", path,
+            "-vframes", "1",
+            "-vf", f"scale={size}:{size}:force_original_aspect_ratio=decrease",
+            "-q:v", "3",
+            tmp_path
+        ], capture_output=True, timeout=10)
+
+        if result.returncode == 0 and os.path.exists(tmp_path):
+            with open(tmp_path, "rb") as f:
+                data = f.read()
+            os.unlink(tmp_path)
+            return send_file(io.BytesIO(data), mimetype="image/jpeg")
+        else:
+            if os.path.exists(tmp_path):
+                os.unlink(tmp_path)
+            return _placeholder_thumb(size, "🎬")
+    except Exception:
+        return _placeholder_thumb(size, "🎬")
+
+
+def _find_ffmpeg():
+    for p in ["/opt/homebrew/bin/ffmpeg", "/usr/local/bin/ffmpeg", "/usr/bin/ffmpeg"]:
+        if os.path.exists(p):
+            return p
+    result = subprocess.run(["which", "ffmpeg"], capture_output=True, text=True)
+    if result.returncode == 0:
+        return result.stdout.strip()
+    return None
+
+
+def _placeholder_thumb(size: int, emoji: str = "?"):
+    """生成纯色占位缩略图"""
+    img = Image.new("RGB", (size, size), color=(40, 40, 40))
+    buf = io.BytesIO()
+    img.save(buf, "JPEG")
+    buf.seek(0)
+    return send_file(buf, mimetype="image/jpeg")
 
 
 # ── 原图 API ──────────────────────────────────────────────
@@ -294,6 +393,29 @@ def face_thumbnail(face_id):
         return send_file(buf, mimetype="image/jpeg")
     except Exception:
         abort(500)
+
+
+@app.route("/api/photo_persons/<int:photo_id>")
+def photo_persons(photo_id):
+    """返回某张照片中出现的所有命名人物"""
+    conn = get_db()
+    row = conn.execute("SELECT path FROM photos WHERE id=?", (photo_id,)).fetchone()
+    if not row:
+        conn.close()
+        return jsonify({"persons": []})
+
+    rows = conn.execute("""
+        SELECT DISTINCT p.id, p.name, MIN(f.id) as face_id
+        FROM faces f
+        JOIN persons p ON p.id = f.person_id
+        WHERE f.photo_path = ? AND p.name IS NOT NULL
+        GROUP BY p.id
+    """, (row["path"],)).fetchall()
+    conn.close()
+
+    persons = [{"id": r["id"], "name": r["name"],
+                "thumb_url": f"/api/face_thumb/{r['face_id']}"} for r in rows]
+    return jsonify({"persons": persons})
 
 
 # ── 统计 API ──────────────────────────────────────────────
