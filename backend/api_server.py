@@ -16,7 +16,7 @@ import hashlib
 from pathlib import Path
 from datetime import datetime, timedelta
 
-from flask import Flask, jsonify, request, send_file, abort, make_response
+from flask import Flask, jsonify, request, send_file, abort, make_response, redirect
 from flask_cors import CORS
 from PIL import Image
 
@@ -153,6 +153,14 @@ FRONTEND_DIR = os.path.join(os.path.dirname(__file__), "..", "frontend")
 app = Flask(__name__, static_folder=FRONTEND_DIR, static_url_path="/")
 CORS(app)
 
+@app.before_request
+def force_https():
+    """HTTP 访问强制跳转到 HTTPS（反向代理模式下看 X-Forwarded-Proto）"""
+    proto = request.headers.get("X-Forwarded-Proto", "")
+    if proto == "http":
+        url = request.url.replace("http://", "https://", 1)
+        return redirect(url, code=301)
+
 @app.route("/")
 def index():
     return app.send_static_file("index.html")
@@ -272,7 +280,7 @@ def auth_check():
         return jsonify({"authenticated": True, "mode": "open"})
     if ok:
         return jsonify({"authenticated": True, "mode": "paired", "device_id": device_id})
-    return jsonify({"authenticated": False, "mode": "pairing"}), 401
+    return jsonify({"authenticated": False, "mode": "pairing"})  # 始终 200，前端判断字段
 
 
 @app.route("/api/login", methods=["POST"])

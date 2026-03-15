@@ -398,7 +398,7 @@ function getOrCreateDeviceId() {
 function ensureDeviceId() {
   let did = localStorage.getItem('pm_device_id');
   if (!did) {
-    did = 'web-' + crypto.randomUUID();
+    did = 'web-' + crypto.randomUUID();  // 仅支持 HTTPS，HTTP 访问会被后端重定向
     localStorage.setItem('pm_device_id', did);
   }
   return did;
@@ -419,7 +419,7 @@ let _pollTimer = null;
 
 async function checkAuth() {
   try {
-    const r = await apiFetch(`/auth_check`);
+    const r = await fetch(`${API}/auth_check`);
     const d = await r.json();
     if (d.authenticated) {
       hideLoginOverlay();
@@ -432,7 +432,7 @@ async function checkAuth() {
         showLoginPanel('loginRequest');
         return false;
       }
-      const s = await apiFetch(`/pair/status?device_id=${encodeURIComponent(did)}`);
+      const s = await fetch(`${API}/pair/status?device_id=${encodeURIComponent(did)}`);
       const sd = await s.json();
       if (sd.status === 'pending') {
         showLoginPanel('loginPending');
@@ -462,7 +462,7 @@ function startPollApproval() {
   if (_pollTimer) return;
   _pollTimer = setInterval(async () => {
     const did = getOrCreateDeviceId();
-    const r = await apiFetch(`/pair/status?device_id=${encodeURIComponent(did)}`);
+    const r = await fetch(`${API}/pair/status?device_id=${encodeURIComponent(did)}`);
     const d = await r.json();
     if (d.status === 'approved') {
       localStorage.setItem('pm_token', d.token);
@@ -481,18 +481,26 @@ async function submitPairRequest() {
   const did = ensureDeviceId();  // 申请时才确定 device_id
   const errEl = document.getElementById('requestError');
   errEl.style.display = 'none';
-  const r = await apiFetch(`/pair/request`, {
-    method: 'POST',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({device_id: did, device_name: name}),
-  });
-  const d = await r.json();
-  if (d.status === 'pending' || d.status === 'already_paired') {
-    document.getElementById('pendingDeviceName').textContent = `设备: ${name}`;
-    showLoginPanel('loginPending');
-    startPollApproval();
-  } else if (d.error) {
-    errEl.textContent = d.error;
+  try {
+    const r = await fetch(`${API}/pair/request`, {  // 不走 apiFetch，配对接口无需认证
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({device_id: did, device_name: name}),
+    });
+    const d = await r.json();
+    if (d.status === 'pending' || d.status === 'already_paired') {
+      document.getElementById('pendingDeviceName').textContent = `设备: ${name}`;
+      showLoginPanel('loginPending');
+      startPollApproval();
+    } else if (d.error) {
+      errEl.textContent = d.error;
+      errEl.style.display = 'block';
+    } else {
+      errEl.textContent = '申请失败: ' + JSON.stringify(d);
+      errEl.style.display = 'block';
+    }
+  } catch(e) {
+    errEl.textContent = '网络错误: ' + e.message;
     errEl.style.display = 'block';
   }
 }
@@ -557,11 +565,7 @@ function authUrl(path) {
 async function apiFetch(path, opts = {}) {
   const headers = Object.assign({}, opts.headers || {}, authHeaders());
   const r = await fetch(`${API}${path}`, {...opts, headers, credentials: 'include'});
-  if (r.status === 401) {
-    // session 过期，重新走认证流程
-    const authed = await checkAuth();
-    if (!authed) return r;
-  }
+  // 注意：不在这里处理 401，避免 checkAuth 循环调用
   return r;
 }
 
