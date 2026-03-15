@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 PhotoMemory - Phase 3: API Server
-启动: python3 api_server.py --db ./photomemory.db --port 8765
+启动: python3 api_server.py --db ./photomemory.db --port 8765 [--token YOUR_TOKEN]
 """
 
 import os
@@ -11,12 +11,60 @@ import sqlite3
 import argparse
 import subprocess
 import tempfile
+import secrets
+import hashlib
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timedelta
 
-from flask import Flask, jsonify, request, send_file, abort
+from flask import Flask, jsonify, request, send_file, abort, make_response
 from flask_cors import CORS
 from PIL import Image
+
+# ── Token 认证 ────────────────────────────────────────────
+ACCESS_TOKEN = None          # 启动时从 --token 或环境变量设置
+SESSION_COOKIE = "pm_session"
+SESSION_TTL_HOURS = 720      # 30天免重登
+
+# 已授权的 session tokens（内存存储，重启失效）
+_valid_sessions: dict[str, datetime] = {}
+
+def _check_auth() -> bool:
+    """验证请求是否已授权"""
+    if not ACCESS_TOKEN:
+        return True  # 未设置 token，本地模式不验证
+
+    # 1. Bearer token（API客户端/Chat工具用）
+    auth = request.headers.get("Authorization", "")
+    if auth.startswith("Bearer "):
+        token = auth[7:]
+        if secrets.compare_digest(token, ACCESS_TOKEN):
+            return True
+
+    # 2. Session cookie（浏览器登录后）
+    session = request.cookies.get(SESSION_COOKIE, "")
+    if session and session in _valid_sessions:
+        if datetime.now() < _valid_sessions[session]:
+            return True
+        else:
+            _valid_sessions.pop(session, None)
+
+    # 3. URL 参数 token（扫码/分享链接用）
+    url_token = request.args.get("token", "")
+    if url_token and secrets.compare_digest(url_token, ACCESS_TOKEN):
+        return True
+
+    return False
+
+def require_auth(f):
+    """装饰器：对 API 路由强制验证"""
+    from functools import wraps
+    @wraps(f)
+    def wrapper(*args, **kwargs):
+        if not _check_auth():
+            return jsonify({"error": "Unauthorized", "code": 401}), 401
+        return f(*args, **kwargs)
+    return wrapper
+
 
 # 中文地名别名映射（英文存储，支持中文搜索）
 CITY_ALIASES = {
@@ -50,6 +98,34 @@ CORS(app)
 def index():
     return app.send_static_file("index.html")
 
+# ── 登录接口 ──────────────────────────────────────────────
+
+@app.route("/api/login", methods=["POST"])
+def login():
+    data = request.get_json() or {}
+    token = data.get("token", "").strip()
+    if not ACCESS_TOKEN:
+        return jsonify({"ok": True, "message": "no auth required"})
+    if not token or not secrets.compare_digest(token, ACCESS_TOKEN):
+        return jsonify({"error": "Invalid token"}), 401
+    # 生成 session
+    session_id = secrets.token_urlsafe(32)
+    _valid_sessions[session_id] = datetime.now() + timedelta(hours=SESSION_TTL_HOURS)
+    resp = make_response(jsonify({"ok": True}))
+    resp.set_cookie(SESSION_COOKIE, session_id,
+                    max_age=SESSION_TTL_HOURS * 3600,
+                    httponly=True, samesite="Lax")
+    return resp
+
+@app.route("/api/auth_check")
+def auth_check():
+    """前端用来检测是否已登录"""
+    if not ACCESS_TOKEN:
+        return jsonify({"authenticated": True, "mode": "open"})
+    if _check_auth():
+        return jsonify({"authenticated": True, "mode": "token"})
+    return jsonify({"authenticated": False}), 401
+
 DB_PATH = None
 
 IMAGE_EXTS = {'.jpg', '.jpeg', '.png', '.heic', '.heif', '.bmp', '.tiff', '.gif', '.webp'}
@@ -65,6 +141,7 @@ def get_db():
 # ── 搜索 API ──────────────────────────────────────────────
 
 @app.route("/api/search", methods=["GET"])
+@require_auth
 def search():
     """
     通用搜索接口
@@ -210,6 +287,7 @@ def _is_person_query(q: str, c) -> bool:
 # ── 缩略图 API ────────────────────────────────────────────
 
 @app.route("/api/thumb/<int:photo_id>")
+@require_auth
 def thumbnail(photo_id):
     conn = get_db()
     row = conn.execute("SELECT path FROM photos WHERE id=?", (photo_id,)).fetchone()
@@ -307,6 +385,7 @@ def _placeholder_thumb(size: int, emoji: str = "?"):
 # ── 原图 API ──────────────────────────────────────────────
 
 @app.route("/api/photo/<int:photo_id>")
+@require_auth
 def original_photo(photo_id):
     conn = get_db()
     row = conn.execute("SELECT path, filename FROM photos WHERE id=?", (photo_id,)).fetchone()
@@ -330,6 +409,7 @@ def original_photo(photo_id):
 # ── 人物 API ──────────────────────────────────────────────
 
 @app.route("/api/persons", methods=["GET"])
+@require_auth
 def list_persons():
     conn = get_db()
     rows = conn.execute("""
@@ -356,6 +436,7 @@ def list_persons():
 
 
 @app.route("/api/persons/<int:person_id>", methods=["PATCH"])
+@require_auth
 def update_person(person_id):
     data = request.get_json()
     name = data.get("name", "").strip()
@@ -421,6 +502,7 @@ def photo_persons(photo_id):
 # ── 统计 API ──────────────────────────────────────────────
 
 @app.route("/api/stats")
+@require_auth
 def stats():
     conn = get_db()
     c = conn.cursor()
@@ -447,6 +529,7 @@ def stats():
 # ── 重复图报告 API ────────────────────────────────────────
 
 @app.route("/api/duplicates")
+@require_auth
 def duplicates():
     conn = get_db()
     rows = conn.execute("""
@@ -462,6 +545,7 @@ def duplicates():
 # ── 目录管理 API ──────────────────────────────────────────
 
 @app.route("/api/directories", methods=["GET"])
+@require_auth
 def list_directories():
     conn = get_db()
     rows = conn.execute("SELECT * FROM directories ORDER BY added_at DESC").fetchall()
@@ -483,10 +567,19 @@ if __name__ == "__main__":
     parser.add_argument("--db", default="./photomemory.db")
     parser.add_argument("--port", type=int, default=8765)
     parser.add_argument("--host", default="0.0.0.0")
+    parser.add_argument("--token", default=os.environ.get("PM_TOKEN", ""),
+                        help="访问 token（留空则不验证，适合纯局域网）")
     args = parser.parse_args()
 
     DB_PATH = os.path.abspath(args.db)
+    ACCESS_TOKEN = args.token or None
+
     print(f"🚀 PhotoMemory API 启动")
-    print(f"   DB  : {DB_PATH}")
-    print(f"   URL : http://localhost:{args.port}")
+    print(f"   DB    : {DB_PATH}")
+    print(f"   URL   : http://localhost:{args.port}")
+    if ACCESS_TOKEN:
+        print(f"   Token : {ACCESS_TOKEN}")
+        print(f"   Auth  : ✅ Bearer Token 已启用")
+    else:
+        print(f"   Auth  : ⚠️  未设置 token，局域网开放访问")
     app.run(host=args.host, port=args.port, debug=False)
