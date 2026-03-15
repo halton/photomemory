@@ -199,7 +199,7 @@
   .modal-actions { display: flex; gap: 8px; justify-content: flex-end; }
 
   /* Login overlay */
-  .login-overlay { display: none; position: fixed; inset: 0;
+  .login-overlay { display: flex; position: fixed; inset: 0;
                    background: #0f0f0f; z-index: 9999;
                    align-items: center; justify-content: center; }
   .login-overlay.show { display: flex; }
@@ -452,7 +452,9 @@ async function checkAuth() {
     }
     return false;
   } catch(e) {
-    return true; // API 不可达，不阻断
+    // API 不可达时也显示登录页，不放行
+    showLoginPanel('loginRequest');
+    return false;
   }
 }
 
