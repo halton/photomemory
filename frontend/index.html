@@ -377,7 +377,9 @@
 </div>
 
 <script>
-const API = 'http://localhost:8765/api';
+const API = (location.hostname === 'localhost' || location.hostname === '127.0.0.1')
+  ? `${location.protocol}//${location.hostname}:8765/api`
+  : `${location.protocol}//${location.host}/api`;
 let currentResults = [];
 let currentOffset = 0;
 let currentTotal = 0;
@@ -417,7 +419,7 @@ let _pollTimer = null;
 
 async function checkAuth() {
   try {
-    const r = await fetch(`${API}/auth_check`);
+    const r = await apiFetch(`/auth_check`);
     const d = await r.json();
     if (d.authenticated) {
       hideLoginOverlay();
@@ -430,7 +432,7 @@ async function checkAuth() {
         showLoginPanel('loginRequest');
         return false;
       }
-      const s = await fetch(`${API}/pair/status?device_id=${encodeURIComponent(did)}`);
+      const s = await apiFetch(`/pair/status?device_id=${encodeURIComponent(did)}`);
       const sd = await s.json();
       if (sd.status === 'pending') {
         showLoginPanel('loginPending');
@@ -458,7 +460,7 @@ function startPollApproval() {
   if (_pollTimer) return;
   _pollTimer = setInterval(async () => {
     const did = getOrCreateDeviceId();
-    const r = await fetch(`${API}/pair/status?device_id=${encodeURIComponent(did)}`);
+    const r = await apiFetch(`/pair/status?device_id=${encodeURIComponent(did)}`);
     const d = await r.json();
     if (d.status === 'approved') {
       localStorage.setItem('pm_token', d.token);
@@ -477,7 +479,7 @@ async function submitPairRequest() {
   const did = ensureDeviceId();  // 申请时才确定 device_id
   const errEl = document.getElementById('requestError');
   errEl.style.display = 'none';
-  const r = await fetch(`${API}/pair/request`, {
+  const r = await apiFetch(`/pair/request`, {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
     body: JSON.stringify({device_id: did, device_name: name}),
@@ -499,7 +501,7 @@ async function submitLogin() {
   const did = getOrCreateDeviceId();
   const errEl = document.getElementById('loginError');
   errEl.style.display = 'none';
-  const r = await fetch(`${API}/login`, {
+  const r = await apiFetch(`/login`, {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
     body: JSON.stringify({device_id: did, token}),
@@ -527,10 +529,44 @@ window.onload = async () => {
   if (authed) init();
 };
 
+// ── Authenticated fetch wrapper ───────────────────────────
+
+function authHeaders() {
+  const token = localStorage.getItem('pm_token');
+  const did   = localStorage.getItem('pm_device_id');
+  const h = {};
+  if (token) h['Authorization'] = `Bearer ${token}`;
+  if (did)   h['X-Device-ID']   = did;
+  return h;
+}
+
+// 给图片 URL 附加认证参数（<img src> 无法带 header）
+function authUrl(path) {
+  const token = localStorage.getItem('pm_token');
+  const did   = localStorage.getItem('pm_device_id');
+  const base  = path.startsWith('http') ? path : (location.origin + path);
+  if (!token || !did) return base;
+  const u = new URL(base);
+  u.searchParams.set('_t', token);
+  u.searchParams.set('_d', did);
+  return u.toString();
+}
+
+async function apiFetch(path, opts = {}) {
+  const headers = Object.assign({}, opts.headers || {}, authHeaders());
+  const r = await fetch(`${API}${path}`, {...opts, headers, credentials: 'include'});
+  if (r.status === 401) {
+    // session 过期，重新走认证流程
+    const authed = await checkAuth();
+    if (!authed) return r;
+  }
+  return r;
+}
+
 // ── Stats ─────────────────────────────────────────────────
 
 async function loadStats() {
-  const r = await fetch(`${API}/stats`).then(r => r.json());
+  const r = await apiFetch(`/stats`).then(r => r.json());
   document.getElementById('count-all').textContent = r.total_photos.toLocaleString();
   document.getElementById('count-no_screenshots').textContent =
     (r.total_photos - r.screenshots).toLocaleString();
@@ -541,7 +577,7 @@ async function loadStats() {
 
 async function loadYears() {
   // 从已有照片中取年份
-  const r = await fetch(`${API}/search?limit=1000&exclude_screenshots=0`).then(r => r.json());
+  const r = await apiFetch(`/search?limit=1000&exclude_screenshots=0`).then(r => r.json());
   const years = new Set();
   r.results.forEach(p => {
     if (p.taken_at) years.add(p.taken_at.substring(0, 4));
@@ -557,7 +593,7 @@ async function loadYears() {
 // ── Persons Sidebar ───────────────────────────────────────
 
 async function loadPersonsSidebar() {
-  const r = await fetch(`${API}/persons`).then(r => r.json());
+  const r = await apiFetch(`/persons`).then(r => r.json());
   const list = document.getElementById('person-list');
   list.innerHTML = '';
   r.persons.filter(p => p.name).forEach(p => {
@@ -566,7 +602,7 @@ async function loadPersonsSidebar() {
     item.onclick = () => filterByPerson(p.name);
     item.innerHTML = `
       ${p.thumb_url
-        ? `<img class="person-avatar" src="${API.replace('/api','')}${p.thumb_url}" onerror="this.style.display='none'">`
+        ? `<img class="person-avatar" src="${authUrl(p.thumb_url)}" onerror="this.style.display='none'">`
         : '👤'}
       <span>${p.name}</span>
       <span class="count">${p.face_count}</span>`;
@@ -608,7 +644,7 @@ async function doSearch(append = false) {
   if (!append) document.getElementById('photoGrid').innerHTML =
     '<div class="loading" style="grid-column:1/-1">加载中...</div>';
 
-  const r = await fetch(`${API}/search?${params}`).then(r => r.json());
+  const r = await apiFetch(`/search?${params}`).then(r => r.json());
   currentTotal = r.total;
   currentResults = append ? [...currentResults, ...r.results] : r.results;
   currentOffset = currentResults.length;
@@ -644,7 +680,7 @@ function renderGrid(photos, append) {
 
     const date = p.taken_at ? p.taken_at.substring(0, 10).replace(/:/g, '-') : '';
     card.innerHTML = `
-      <img src="${API}/thumb/${p.id}" loading="lazy" alt="${p.filename}"
+      <img src="${authUrl(`/api/thumb/${p.id}`)}" loading="lazy" alt="${p.filename}"
            onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22/>'">
       ${p.is_duplicate ? '<span class="badge dup">重复</span>' : ''}
       ${p.is_screenshot ? '<span class="badge shot">截图</span>' : ''}
@@ -667,7 +703,7 @@ async function updateLightbox() {
   if (!p) return;
 
   // 图片
-  document.getElementById('lightboxImg').src = `${API}/photo/${p.id}`;
+  document.getElementById('lightboxImg').src = authUrl(`/api/photo/${p.id}`);
 
   // 基础信息
   document.getElementById('lbFilename').textContent = p.filename || '-';
@@ -728,14 +764,14 @@ async function loadLightboxPersons(photoId) {
   try {
     const p = currentResults.find(r => r.id === photoId);
     if (!p) return;
-    const r = await fetch(`${API}/photo_persons/${photoId}`).then(r => r.json());
+    const r = await apiFetch(`/photo_persons/${photoId}`).then(r => r.json());
     const personsSection = document.getElementById('lbPersons');
     const personList = document.getElementById('lbPersonList');
     if (r.persons && r.persons.length > 0) {
       personsSection.style.display = '';
       personList.innerHTML = r.persons.map(person => `
         <div class="lb-person-chip" onclick="filterByPerson('${person.name}'); closeLightbox();">
-          ${person.thumb_url ? `<img src="${API.replace('/api','')}${person.thumb_url}">` : ''}
+          ${person.thumb_url ? `<img src="${authUrl(person.thumb_url)}">` : ''}
           ${person.name}
         </div>`).join('');
     } else {
@@ -789,7 +825,7 @@ function showView(view) {
 }
 
 async function loadPersonsView() {
-  const r = await fetch(`${API}/persons`).then(r => r.json());
+  const r = await apiFetch(`/persons`).then(r => r.json());
   const grid = document.getElementById('personsGrid');
   grid.innerHTML = '';
 
@@ -802,7 +838,7 @@ async function loadPersonsView() {
     const card = document.createElement('div');
     card.className = 'person-card';
     card.innerHTML = `
-      <img src="${p.thumb_url ? API.replace('/api','') + p.thumb_url : ''}"
+      <img src="${p.thumb_url ? authUrl(p.thumb_url) : ''}"
            onerror="this.style.background='#333';this.src=''">
       <div class="pname">${p.name || '未命名'}</div>
       <div class="pcount">${p.face_count} 张照片</div>
@@ -835,7 +871,7 @@ function closeModal() {
 async function submitRename() {
   const name = document.getElementById('renameInput').value.trim();
   if (!name) return;
-  await fetch(`${API}/persons/${renamePersonId}`, {
+  await apiFetch(`/persons/${renamePersonId}`, {
     method: 'PATCH',
     headers: {'Content-Type': 'application/json'},
     body: JSON.stringify({name}),

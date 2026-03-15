@@ -90,6 +90,15 @@ def _check_auth():
             if secrets.compare_digest(token, paired["token"]):
                 return True, device_id
 
+    # 3. URL query 参数 token + device_id（<img src> 等无法带 header 的场景）
+    url_token = request.args.get("_t", "")
+    url_did   = request.args.get("_d", "")
+    if url_token and url_did:
+        paired = _devices["paired"].get(url_did)
+        if paired and paired.get("status") == "active":
+            if secrets.compare_digest(url_token, paired["token"]):
+                return True, url_did
+
     return False, ""
 
 def require_auth(f):
