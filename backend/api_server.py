@@ -175,7 +175,9 @@ def pair_request():
         if d.get("status") == "active":
             return jsonify({"status": "already_paired", "device_id": device_id})
         elif d.get("status") == "revoked":
-            return jsonify({"status": "revoked", "message": "此设备已被吊销"}), 403
+            # 允许吊销后重新申请：从 paired 移除，进入 pending
+            del _devices["paired"][device_id]
+            # 继续走下面的新申请逻辑
 
     # 已在 pending 中
     if device_id in _devices["pending"]:

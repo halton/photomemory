@@ -463,7 +463,10 @@ async function checkAuth() {
         hideLoginOverlay();
         return true;
       } else if (sd.status === 'revoked') {
-        document.getElementById('requestError').textContent = '此设备已被吊销，请联系管理员';
+        // 吊销后清除旧凭证，引导重新申请
+        localStorage.removeItem('pm_device_id');
+        localStorage.removeItem('pm_token');
+        document.getElementById('requestError').textContent = '此设备已被吊销，请重新申请配对';
         document.getElementById('requestError').style.display = 'block';
         showLoginPanel('loginRequest');
       } else {
@@ -490,6 +493,10 @@ function startPollApproval() {
       init();
     } else if (d.status === 'revoked') {
       clearInterval(_pollTimer); _pollTimer = null;
+      localStorage.removeItem('pm_device_id');
+      localStorage.removeItem('pm_token');
+      document.getElementById('requestError').textContent = '此设备已被吊销，请重新申请配对';
+      document.getElementById('requestError').style.display = 'block';
       showLoginPanel('loginRequest');
     }
   }, 3000);
