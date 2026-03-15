@@ -1,0 +1,526 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PhotoMemory</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+         background: #0f0f0f; color: #e0e0e0; min-height: 100vh; }
+
+  /* Header */
+  header { background: #1a1a1a; border-bottom: 1px solid #2a2a2a;
+           padding: 14px 24px; display: flex; align-items: center; gap: 16px;
+           position: sticky; top: 0; z-index: 100; }
+  header h1 { font-size: 18px; font-weight: 600; color: #fff;
+              white-space: nowrap; }
+  header h1 span { color: #6366f1; }
+
+  /* Search bar */
+  .search-wrap { flex: 1; display: flex; gap: 8px; max-width: 600px; }
+  .search-wrap input { flex: 1; background: #2a2a2a; border: 1px solid #3a3a3a;
+    border-radius: 8px; padding: 8px 14px; color: #e0e0e0; font-size: 14px;
+    outline: none; }
+  .search-wrap input:focus { border-color: #6366f1; }
+  .search-wrap input::placeholder { color: #666; }
+  .btn { background: #6366f1; color: #fff; border: none; border-radius: 8px;
+         padding: 8px 16px; cursor: pointer; font-size: 14px; white-space: nowrap; }
+  .btn:hover { background: #5254cc; }
+  .btn.secondary { background: #2a2a2a; border: 1px solid #3a3a3a; color: #aaa; }
+  .btn.secondary:hover { background: #333; color: #fff; }
+
+  /* Layout */
+  .layout { display: flex; height: calc(100vh - 57px); }
+
+  /* Sidebar */
+  aside { width: 220px; min-width: 220px; background: #141414;
+          border-right: 1px solid #2a2a2a; overflow-y: auto;
+          padding: 16px 0; }
+  .sidebar-section { margin-bottom: 8px; }
+  .sidebar-title { padding: 6px 16px; font-size: 11px; font-weight: 600;
+                   color: #666; text-transform: uppercase; letter-spacing: 0.5px; }
+  .sidebar-item { padding: 7px 16px; font-size: 13px; cursor: pointer;
+                  color: #aaa; display: flex; align-items: center; gap: 8px;
+                  border-left: 3px solid transparent; }
+  .sidebar-item:hover { background: #1e1e1e; color: #fff; }
+  .sidebar-item.active { background: #1e1e1e; color: #fff;
+                          border-left-color: #6366f1; }
+  .sidebar-item .count { margin-left: auto; background: #2a2a2a;
+                          border-radius: 10px; padding: 1px 7px;
+                          font-size: 11px; color: #666; }
+
+  /* Persons in sidebar */
+  .person-avatar { width: 24px; height: 24px; border-radius: 50%;
+                   object-fit: cover; background: #333; }
+
+  /* Filters bar */
+  .filters { padding: 10px 16px; background: #141414;
+             border-bottom: 1px solid #2a2a2a;
+             display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .filter-chip { background: #2a2a2a; border: 1px solid #3a3a3a;
+                 border-radius: 16px; padding: 4px 12px; font-size: 12px;
+                 cursor: pointer; color: #aaa; }
+  .filter-chip:hover, .filter-chip.active { background: #6366f1;
+    border-color: #6366f1; color: #fff; }
+  select.filter-select { background: #2a2a2a; border: 1px solid #3a3a3a;
+    border-radius: 8px; padding: 5px 10px; color: #aaa; font-size: 12px;
+    outline: none; cursor: pointer; }
+  select.filter-select:focus { border-color: #6366f1; }
+
+  /* Main content */
+  main { flex: 1; overflow-y: auto; }
+  .content-wrap { display: flex; flex-direction: column; height: 100%; }
+
+  /* Stats bar */
+  .stats-bar { padding: 8px 16px; background: #141414;
+               border-bottom: 1px solid #2a2a2a;
+               font-size: 12px; color: #666; display: flex; gap: 16px; }
+  .stats-bar span { color: #888; }
+  .stats-bar b { color: #aaa; }
+
+  /* Photo grid */
+  .photo-grid { padding: 16px; display: grid;
+                grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+                gap: 8px; }
+  .photo-card { position: relative; border-radius: 8px; overflow: hidden;
+                background: #1a1a1a; cursor: pointer; aspect-ratio: 1;
+                transition: transform 0.15s; }
+  .photo-card:hover { transform: scale(1.02); }
+  .photo-card img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .photo-card .overlay { position: absolute; bottom: 0; left: 0; right: 0;
+    background: linear-gradient(transparent, rgba(0,0,0,0.7));
+    padding: 20px 8px 8px; opacity: 0; transition: opacity 0.2s; }
+  .photo-card:hover .overlay { opacity: 1; }
+  .photo-card .overlay .date { font-size: 11px; color: #ddd; }
+  .photo-card .badge { position: absolute; top: 6px; right: 6px;
+    background: rgba(0,0,0,0.6); border-radius: 4px; padding: 2px 5px;
+    font-size: 10px; color: #fff; }
+  .photo-card .badge.dup { background: rgba(239,68,68,0.8); }
+  .photo-card .badge.shot { background: rgba(234,179,8,0.8); }
+
+  /* Load more */
+  .load-more { text-align: center; padding: 24px;
+               display: none; }
+  .load-more.show { display: block; }
+
+  /* Lightbox */
+  .lightbox { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.92);
+              z-index: 999; align-items: center; justify-content: center; }
+  .lightbox.open { display: flex; }
+  .lightbox-inner { max-width: 90vw; max-height: 90vh; position: relative; }
+  .lightbox-inner img { max-width: 90vw; max-height: 85vh; object-fit: contain;
+                         border-radius: 8px; }
+  .lightbox-info { position: absolute; bottom: -36px; left: 0; right: 0;
+                   text-align: center; font-size: 12px; color: #888; }
+  .lightbox-close { position: absolute; top: -40px; right: 0; background: none;
+                    border: none; color: #aaa; font-size: 24px; cursor: pointer; }
+  .lightbox-close:hover { color: #fff; }
+  .lightbox-nav { position: absolute; top: 50%; transform: translateY(-50%);
+                  background: rgba(0,0,0,0.5); border: none; color: #fff;
+                  font-size: 24px; cursor: pointer; padding: 12px 16px;
+                  border-radius: 8px; }
+  .lightbox-nav:hover { background: rgba(99,102,241,0.7); }
+  .lightbox-nav.prev { left: -60px; }
+  .lightbox-nav.next { right: -60px; }
+
+  /* Persons view */
+  .persons-grid { padding: 16px; display: grid;
+                  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+                  gap: 12px; }
+  .person-card { background: #1a1a1a; border-radius: 12px; padding: 16px;
+                 text-align: center; cursor: pointer;
+                 border: 1px solid #2a2a2a; transition: border-color 0.15s; }
+  .person-card:hover { border-color: #6366f1; }
+  .person-card img { width: 72px; height: 72px; border-radius: 50%;
+                     object-fit: cover; margin-bottom: 10px;
+                     background: #333; }
+  .person-card .pname { font-size: 13px; font-weight: 500; color: #e0e0e0; }
+  .person-card .pcount { font-size: 11px; color: #666; margin-top: 3px; }
+  .person-card .pedit { margin-top: 8px; font-size: 11px; color: #6366f1;
+                        display: none; }
+  .person-card:hover .pedit { display: block; }
+
+  /* Empty state */
+  .empty { text-align: center; padding: 60px 20px; color: #444; }
+  .empty .icon { font-size: 48px; margin-bottom: 12px; }
+  .empty p { font-size: 14px; }
+
+  /* Loading */
+  .loading { text-align: center; padding: 40px; color: #444; }
+
+  /* Modal */
+  .modal-backdrop { display: none; position: fixed; inset: 0;
+                    background: rgba(0,0,0,0.7); z-index: 200;
+                    align-items: center; justify-content: center; }
+  .modal-backdrop.open { display: flex; }
+  .modal { background: #1a1a1a; border-radius: 12px; padding: 24px;
+           min-width: 300px; border: 1px solid #2a2a2a; }
+  .modal h3 { margin-bottom: 16px; font-size: 15px; }
+  .modal input { width: 100%; background: #2a2a2a; border: 1px solid #3a3a3a;
+                 border-radius: 8px; padding: 8px 12px; color: #e0e0e0;
+                 font-size: 14px; outline: none; margin-bottom: 16px; }
+  .modal input:focus { border-color: #6366f1; }
+  .modal-actions { display: flex; gap: 8px; justify-content: flex-end; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Photo<span>Memory</span></h1>
+  <div class="search-wrap">
+    <input type="text" id="searchInput" placeholder="搜索人物、地点、时间..." />
+    <button class="btn" onclick="doSearch()">搜索</button>
+  </div>
+  <button class="btn secondary" onclick="showView('persons')">👤 人物管理</button>
+</header>
+
+<div class="layout">
+  <aside id="sidebar">
+    <div class="sidebar-section">
+      <div class="sidebar-title">快速筛选</div>
+      <div class="sidebar-item active" onclick="setFilter('all')" id="filter-all">
+        🖼️ 全部照片 <span class="count" id="count-all">-</span>
+      </div>
+      <div class="sidebar-item" onclick="setFilter('no_screenshots')" id="filter-no_screenshots">
+        📷 排除截图 <span class="count" id="count-no_screenshots">-</span>
+      </div>
+      <div class="sidebar-item" onclick="setFilter('duplicates')" id="filter-duplicates">
+        🔁 重复图片 <span class="count" id="count-duplicates">-</span>
+      </div>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-title">人物</div>
+      <div id="person-list"></div>
+    </div>
+  </aside>
+
+  <main>
+    <div class="content-wrap">
+      <div class="filters" id="filtersBar">
+        <span style="font-size:12px;color:#666">年份:</span>
+        <select class="filter-select" id="yearSelect" onchange="doSearch()">
+          <option value="">全部</option>
+        </select>
+        <span style="font-size:12px;color:#666">月份:</span>
+        <select class="filter-select" id="monthSelect" onchange="doSearch()">
+          <option value="">全部</option>
+          <option value="01">1月</option><option value="02">2月</option>
+          <option value="03">3月</option><option value="04">4月</option>
+          <option value="05">5月</option><option value="06">6月</option>
+          <option value="07">7月</option><option value="08">8月</option>
+          <option value="09">9月</option><option value="10">10月</option>
+          <option value="11">11月</option><option value="12">12月</option>
+        </select>
+      </div>
+      <div class="stats-bar" id="statsBar">加载中...</div>
+
+      <!-- Photos view -->
+      <div id="photosView">
+        <div class="photo-grid" id="photoGrid"></div>
+        <div class="load-more" id="loadMore">
+          <button class="btn secondary" onclick="loadMore()">加载更多</button>
+        </div>
+      </div>
+
+      <!-- Persons view -->
+      <div id="personsView" style="display:none">
+        <div class="persons-grid" id="personsGrid"></div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<!-- Lightbox -->
+<div class="lightbox" id="lightbox" onclick="closeLightbox(event)">
+  <div class="lightbox-inner">
+    <button class="lightbox-close" onclick="closeLightbox()">✕</button>
+    <button class="lightbox-nav prev" onclick="lightboxNav(-1)">‹</button>
+    <img id="lightboxImg" src="" alt="">
+    <button class="lightbox-nav next" onclick="lightboxNav(1)">›</button>
+    <div class="lightbox-info" id="lightboxInfo"></div>
+  </div>
+</div>
+
+<!-- Rename Modal -->
+<div class="modal-backdrop" id="renameModal">
+  <div class="modal">
+    <h3>命名人物</h3>
+    <input type="text" id="renameInput" placeholder="输入姓名" />
+    <div class="modal-actions">
+      <button class="btn secondary" onclick="closeModal()">取消</button>
+      <button class="btn" onclick="submitRename()">保存</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const API = 'http://localhost:8765/api';
+let currentResults = [];
+let currentOffset = 0;
+let currentTotal = 0;
+let currentFilter = 'all';
+let currentPersonId = null;
+let lightboxIndex = 0;
+let renamePersonId = null;
+
+// ── Init ──────────────────────────────────────────────────
+
+window.onload = async () => {
+  await loadStats();
+  await loadPersonsSidebar();
+  await loadYears();
+  doSearch();
+};
+
+// ── Stats ─────────────────────────────────────────────────
+
+async function loadStats() {
+  const r = await fetch(`${API}/stats`).then(r => r.json());
+  document.getElementById('count-all').textContent = r.total_photos.toLocaleString();
+  document.getElementById('count-no_screenshots').textContent =
+    (r.total_photos - r.screenshots).toLocaleString();
+  document.getElementById('count-duplicates').textContent = r.duplicates.toLocaleString();
+}
+
+// ── Years ─────────────────────────────────────────────────
+
+async function loadYears() {
+  // 从已有照片中取年份
+  const r = await fetch(`${API}/search?limit=1000&exclude_screenshots=0`).then(r => r.json());
+  const years = new Set();
+  r.results.forEach(p => {
+    if (p.taken_at) years.add(p.taken_at.substring(0, 4));
+  });
+  const sel = document.getElementById('yearSelect');
+  [...years].sort().reverse().forEach(y => {
+    const opt = document.createElement('option');
+    opt.value = y; opt.textContent = y + '年';
+    sel.appendChild(opt);
+  });
+}
+
+// ── Persons Sidebar ───────────────────────────────────────
+
+async function loadPersonsSidebar() {
+  const r = await fetch(`${API}/persons`).then(r => r.json());
+  const list = document.getElementById('person-list');
+  list.innerHTML = '';
+  r.persons.filter(p => p.name).forEach(p => {
+    const item = document.createElement('div');
+    item.className = 'sidebar-item';
+    item.onclick = () => filterByPerson(p.name);
+    item.innerHTML = `
+      ${p.thumb_url
+        ? `<img class="person-avatar" src="${API.replace('/api','')}${p.thumb_url}" onerror="this.style.display='none'">`
+        : '👤'}
+      <span>${p.name}</span>
+      <span class="count">${p.face_count}</span>`;
+    list.appendChild(item);
+  });
+  if (r.persons.filter(p => !p.name).length > 0) {
+    const item = document.createElement('div');
+    item.className = 'sidebar-item';
+    item.style.color = '#f59e0b';
+    item.onclick = () => showView('persons');
+    item.innerHTML = `⚠️ ${r.persons.filter(p=>!p.name).length} 个未命名`;
+    list.appendChild(item);
+  }
+}
+
+// ── Search ────────────────────────────────────────────────
+
+async function doSearch(append = false) {
+  if (!append) {
+    currentOffset = 0;
+    currentResults = [];
+  }
+
+  const q = document.getElementById('searchInput').value.trim();
+  const year = document.getElementById('yearSelect').value;
+  const month = document.getElementById('monthSelect').value;
+
+  const params = new URLSearchParams({
+    limit: 60, offset: currentOffset,
+    exclude_screenshots: currentFilter === 'no_screenshots' ? '1' : '0',
+  });
+  if (q) params.set('q', q);
+  if (year) params.set('year', year);
+  if (month && year) params.set('month', month);
+  if (currentFilter === 'duplicates') params.set('exclude_duplicates', '0');
+  if (currentPersonId) params.set('person', currentPersonId);
+
+  showView('photos');
+  if (!append) document.getElementById('photoGrid').innerHTML =
+    '<div class="loading" style="grid-column:1/-1">加载中...</div>';
+
+  const r = await fetch(`${API}/search?${params}`).then(r => r.json());
+  currentTotal = r.total;
+  currentResults = append ? [...currentResults, ...r.results] : r.results;
+  currentOffset = currentResults.length;
+
+  renderGrid(r.results, append);
+  document.getElementById('statsBar').innerHTML =
+    `共 <b>${r.total.toLocaleString()}</b> 张照片` +
+    (q ? ` · 关键词: <b>${q}</b>` : '') +
+    (year ? ` · ${year}年` : '') +
+    (month ? `${month}月` : '');
+
+  const loadMoreEl = document.getElementById('loadMore');
+  loadMoreEl.className = currentResults.length < currentTotal ? 'load-more show' : 'load-more';
+}
+
+function loadMore() { doSearch(true); }
+
+// ── Render Grid ───────────────────────────────────────────
+
+function renderGrid(photos, append) {
+  const grid = document.getElementById('photoGrid');
+  if (!append) grid.innerHTML = '';
+
+  if (!append && photos.length === 0) {
+    grid.innerHTML = '<div class="empty" style="grid-column:1/-1"><div class="icon">🔍</div><p>没有找到照片</p></div>';
+    return;
+  }
+
+  photos.forEach((p, i) => {
+    const card = document.createElement('div');
+    card.className = 'photo-card';
+    const globalIdx = append ? currentResults.length - photos.length + i : i;
+
+    const date = p.taken_at ? p.taken_at.substring(0, 10).replace(/:/g, '-') : '';
+    card.innerHTML = `
+      <img src="${API}/thumb/${p.id}" loading="lazy" alt="${p.filename}"
+           onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22/>'">
+      ${p.is_duplicate ? '<span class="badge dup">重复</span>' : ''}
+      ${p.is_screenshot ? '<span class="badge shot">截图</span>' : ''}
+      <div class="overlay"><div class="date">${date}</div></div>`;
+    card.onclick = () => openLightbox(globalIdx);
+    grid.appendChild(card);
+  });
+}
+
+// ── Lightbox ──────────────────────────────────────────────
+
+function openLightbox(index) {
+  lightboxIndex = index;
+  updateLightbox();
+  document.getElementById('lightbox').classList.add('open');
+}
+
+function updateLightbox() {
+  const p = currentResults[lightboxIndex];
+  if (!p) return;
+  document.getElementById('lightboxImg').src = `${API}/photo/${p.id}`;
+  const date = p.taken_at ? p.taken_at.substring(0, 16).replace(/:/g, p.taken_at.indexOf(':') < 5 ? ':' : '-').replace('T',' ') : '未知时间';
+  document.getElementById('lightboxInfo').textContent =
+    `${p.filename} · ${date}${p.gps_city ? ' · ' + p.gps_city : ''}`;
+}
+
+function lightboxNav(dir) {
+  lightboxIndex = Math.max(0, Math.min(currentResults.length - 1, lightboxIndex + dir));
+  updateLightbox();
+}
+
+function closeLightbox(e) {
+  if (!e || e.target.id === 'lightbox') {
+    document.getElementById('lightbox').classList.remove('open');
+  }
+}
+
+document.addEventListener('keydown', e => {
+  if (!document.getElementById('lightbox').classList.contains('open')) return;
+  if (e.key === 'Escape') closeLightbox();
+  if (e.key === 'ArrowRight') lightboxNav(1);
+  if (e.key === 'ArrowLeft') lightboxNav(-1);
+});
+
+// ── Filter ────────────────────────────────────────────────
+
+function setFilter(f) {
+  currentFilter = f;
+  currentPersonId = null;
+  document.querySelectorAll('.sidebar-item').forEach(el => el.classList.remove('active'));
+  document.getElementById(`filter-${f}`)?.classList.add('active');
+  doSearch();
+}
+
+function filterByPerson(name) {
+  currentPersonId = null;
+  document.getElementById('searchInput').value = name;
+  currentFilter = 'all';
+  doSearch();
+}
+
+// ── Views ─────────────────────────────────────────────────
+
+function showView(view) {
+  document.getElementById('photosView').style.display = view === 'photos' ? '' : 'none';
+  document.getElementById('personsView').style.display = view === 'persons' ? '' : 'none';
+  document.getElementById('filtersBar').style.display = view === 'photos' ? '' : 'none';
+  if (view === 'persons') loadPersonsView();
+}
+
+async function loadPersonsView() {
+  const r = await fetch(`${API}/persons`).then(r => r.json());
+  const grid = document.getElementById('personsGrid');
+  grid.innerHTML = '';
+
+  if (r.persons.length === 0) {
+    grid.innerHTML = '<div class="empty"><div class="icon">👤</div><p>还没有识别到人物<br>请先运行 Phase 2 人脸检测</p></div>';
+    return;
+  }
+
+  r.persons.forEach(p => {
+    const card = document.createElement('div');
+    card.className = 'person-card';
+    card.innerHTML = `
+      <img src="${p.thumb_url ? API.replace('/api','') + p.thumb_url : ''}"
+           onerror="this.style.background='#333';this.src=''">
+      <div class="pname">${p.name || '未命名'}</div>
+      <div class="pcount">${p.face_count} 张照片</div>
+      <div class="pedit" onclick="openRename(${p.id}, '${p.name||''}', event)">✏️ 命名</div>`;
+    if (p.name) {
+      card.querySelector('.pname').onclick = (e) => {
+        e.stopPropagation();
+        filterByPerson(p.name);
+        showView('photos');
+      };
+    }
+    grid.appendChild(card);
+  });
+}
+
+// ── Rename ────────────────────────────────────────────────
+
+function openRename(personId, currentName, e) {
+  e?.stopPropagation();
+  renamePersonId = personId;
+  document.getElementById('renameInput').value = currentName;
+  document.getElementById('renameModal').classList.add('open');
+  setTimeout(() => document.getElementById('renameInput').focus(), 100);
+}
+
+function closeModal() {
+  document.getElementById('renameModal').classList.remove('open');
+}
+
+async function submitRename() {
+  const name = document.getElementById('renameInput').value.trim();
+  if (!name) return;
+  await fetch(`${API}/persons/${renamePersonId}`, {
+    method: 'PATCH',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({name}),
+  });
+  closeModal();
+  loadPersonsView();
+  loadPersonsSidebar();
+}
+
+document.getElementById('searchInput').addEventListener('keydown', e => {
+  if (e.key === 'Enter') doSearch();
+});
+</script>
+</body>
+</html>
