@@ -390,17 +390,31 @@ let renamePersonId = null;
 
 // ── Device Pairing Auth ───────────────────────────────────
 
+// cookie 辅助（device_id 长期持久化，防 localStorage 丢失）
+function _getCookie(name) {
+  return document.cookie.split('; ').reduce((r, c) => {
+    const [k, v] = c.split('=');
+    return k === name ? decodeURIComponent(v) : r;
+  }, null);
+}
+function _setCookie(name, value, days) {
+  const exp = new Date(Date.now() + days * 864e5).toUTCString();
+  document.cookie = `${name}=${encodeURIComponent(value)}; expires=${exp}; path=/; SameSite=Lax`;
+}
+
 function getOrCreateDeviceId() {
   // 只读取，不自动创建——申请配对时才生成并保存
-  return localStorage.getItem('pm_device_id') || null;
+  return localStorage.getItem('pm_device_id') || _getCookie('pm_device_id') || null;
 }
 
 function ensureDeviceId() {
-  let did = localStorage.getItem('pm_device_id');
+  // localStorage 优先，cookie 备份，两者互相恢复
+  let did = localStorage.getItem('pm_device_id') || _getCookie('pm_device_id');
   if (!did) {
-    did = 'web-' + crypto.randomUUID();  // 仅支持 HTTPS，HTTP 访问会被后端重定向
-    localStorage.setItem('pm_device_id', did);
+    did = 'web-' + crypto.randomUUID();  // 仅支持 HTTPS
   }
+  localStorage.setItem('pm_device_id', did);
+  _setCookie('pm_device_id', did, 365);  // cookie 备份，1年有效
   return did;
 }
 
@@ -419,8 +433,12 @@ let _pollTimer = null;
 
 async function checkAuth() {
   try {
-    const did = localStorage.getItem('pm_device_id');
-    const token = localStorage.getItem('pm_token');
+    // localStorage 优先，cookie 兜底（防 localStorage 丢失）
+    const did = localStorage.getItem('pm_device_id') || _getCookie('pm_device_id');
+    const token = localStorage.getItem('pm_token') || _getCookie('pm_token');
+    // 恢复到 localStorage（如果只有 cookie）
+    if (did) localStorage.setItem('pm_device_id', did);
+    if (token) localStorage.setItem('pm_token', token);
 
     // 如果本地有 token，先尝试直接验证
     if (did && token) {
@@ -461,7 +479,7 @@ async function checkAuth() {
           '设备 ID: ' + did.slice(0, 16) + '...';
         startPollApproval();
       } else if (sd.status === 'approved') {
-        localStorage.setItem('pm_token', sd.token);
+        localStorage.setItem('pm_token', sd.token); _setCookie('pm_token', sd.token, 365);
         hideLoginOverlay();
         return true;
       } else if (sd.status === 'revoked') {
@@ -489,7 +507,7 @@ function startPollApproval() {
     const r = await fetch(`${API}/pair/status?device_id=${encodeURIComponent(did)}`);
     const d = await r.json();
     if (d.status === 'approved') {
-      localStorage.setItem('pm_token', d.token);
+      localStorage.setItem('pm_token', d.token); _setCookie('pm_token', d.token, 365);
       clearInterval(_pollTimer); _pollTimer = null;
       hideLoginOverlay();
       init();
@@ -549,7 +567,7 @@ async function submitLogin() {
   });
   const d = await r.json();
   if (d.authenticated) {
-    localStorage.setItem('pm_token', token);
+    localStorage.setItem('pm_token', token); _setCookie('pm_token', token, 365);
     hideLoginOverlay();
     init();
   } else {
