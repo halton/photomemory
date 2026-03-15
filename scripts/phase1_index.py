@@ -20,6 +20,13 @@ except ImportError:
     print("缺少依赖，请运行: pip3 install Pillow piexif")
     sys.exit(1)
 
+try:
+    import reverse_geocode
+    HAS_GEO = True
+except ImportError:
+    HAS_GEO = False
+    print("⚠️  reverse_geocode 未安装，GPS城市将为空。运行: pip3 install reverse-geocode")
+
 # 支持的图片格式
 IMAGE_EXTS = {'.jpg', '.jpeg', '.png', '.heic', '.heif', '.tiff', '.tif', '.bmp', '.gif', '.webp', '.mov', '.mp4'}
 
@@ -230,14 +237,17 @@ def scan_directory(dir_path: str, label: str, conn: sqlite3.Connection, verbose=
             elif fhash:
                 hash_map[fhash] = full_path
 
+            # 逆地理编码（批量，先暂存）
+            gps_city = None
+
             c.execute("""
                 INSERT OR IGNORE INTO photos
-                (path, filename, size, file_hash, taken_at, gps_lat, gps_lon,
+                (path, filename, size, file_hash, taken_at, gps_lat, gps_lon, gps_city,
                  width, height, is_screenshot, is_duplicate, duplicate_of, indexed_at, dir_label)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """, (
                 full_path, fname, fsize, fhash,
-                meta["taken_at"], meta["gps_lat"], meta["gps_lon"],
+                meta["taken_at"], meta["gps_lat"], meta["gps_lon"], gps_city,
                 width, height,
                 screenshot, is_dup, dup_of,
                 now, label
@@ -246,6 +256,26 @@ def scan_directory(dir_path: str, label: str, conn: sqlite3.Connection, verbose=
 
             if new_count % 200 == 0:
                 conn.commit()
+
+    # 批量逆地理编码
+    if HAS_GEO:
+        print("🌍 正在逆地理编码...")
+        geo_rows = c.execute(
+            "SELECT id, gps_lat, gps_lon FROM photos WHERE gps_lat IS NOT NULL AND gps_city IS NULL"
+        ).fetchall()
+        if geo_rows:
+            coords = [(r[1], r[2]) for r in geo_rows]
+            geo_results = reverse_geocode.search(coords)
+            updates = []
+            for (photo_id, _, __), geo in zip(geo_rows, geo_results):
+                if geo.get('country_code') == 'CN':
+                    label_geo = f"{geo.get('state','')} {geo.get('city','')}".strip()
+                else:
+                    label_geo = f"{geo.get('city','')}, {geo.get('country','')}".strip()
+                updates.append((label_geo, photo_id))
+            c.executemany("UPDATE photos SET gps_city=? WHERE id=?", updates)
+            conn.commit()
+            print(f"  已解析 {len(updates)} 条位置")
 
     conn.commit()
 

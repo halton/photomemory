@@ -155,7 +155,7 @@ def detect_faces(db_path: str, limit=None):
 
 # ── 人脸聚类 ──────────────────────────────────────────────
 
-def cluster_faces(db_path: str, eps=0.4, min_samples=2):
+def cluster_faces(db_path: str, eps=0.6, min_samples=2):
     """
     用 DBSCAN 对所有未分配人物的人脸聚类。
     eps: 相似度阈值（越小越严格，0.3-0.5 合适）
@@ -319,7 +319,7 @@ def main():
     parser.add_argument("--cluster", action="store_true", help="聚类人脸 → 人物")
     parser.add_argument("--label", action="store_true", help="交互式命名人物")
     parser.add_argument("--stats", action="store_true", help="显示统计")
-    parser.add_argument("--eps", type=float, default=0.4, help="聚类阈值(0.3-0.5)")
+    parser.add_argument("--eps", type=float, default=0.6, help="聚类阈值(0.5-0.7，越大越宽松)")
     parser.add_argument("--limit", type=int, help="限制检测张数（测试用）")
     args = parser.parse_args()
 
