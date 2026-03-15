@@ -328,16 +328,40 @@
   </div>
 </div>
 
-<!-- Login Overlay -->
+<!-- Login / Pairing Overlay -->
 <div class="login-overlay" id="loginOverlay">
-  <div class="login-box">
+
+  <!-- 等待审批状态 -->
+  <div class="login-box" id="loginPending" style="display:none">
     <h2>Photo<span>Memory</span></h2>
-    <p>输入访问 Token 继续</p>
+    <div style="font-size:48px;margin:16px 0">⏳</div>
+    <p style="font-size:15px;color:#ccc;margin-bottom:8px">配对申请已发送</p>
+    <p style="color:#666;font-size:13px;margin-bottom:24px">等待管理员审批，审批后自动进入...</p>
+    <div style="color:#666;font-size:12px" id="pendingDeviceName"></div>
+  </div>
+
+  <!-- 已获批，输入 token 激活 -->
+  <div class="login-box" id="loginApproved" style="display:none">
+    <h2>Photo<span>Memory</span></h2>
+    <div style="font-size:48px;margin:16px 0">✅</div>
+    <p style="font-size:15px;color:#ccc;margin-bottom:8px">配对已批准！</p>
+    <p style="color:#666;font-size:13px;margin-bottom:24px">粘贴管理员给你的 Token</p>
     <input type="password" id="loginTokenInput" placeholder="粘贴 Token..."
            onkeydown="if(event.key==='Enter') submitLogin()" />
     <button class="login-btn" onclick="submitLogin()">进入 →</button>
     <div class="login-error" id="loginError">Token 不正确，请重试</div>
   </div>
+
+  <!-- 首次访问：填设备名申请 -->
+  <div class="login-box" id="loginRequest">
+    <h2>Photo<span>Memory</span></h2>
+    <p>输入设备名称，发送配对申请</p>
+    <input type="text" id="deviceNameInput" placeholder="如：妈妈的 iPhone"
+           onkeydown="if(event.key==='Enter') submitPairRequest()" />
+    <button class="login-btn" onclick="submitPairRequest()">申请配对 →</button>
+    <div class="login-error" id="requestError"></div>
+  </div>
+
 </div>
 
 <!-- Rename Modal -->
@@ -362,44 +386,121 @@ let currentPersonId = null;
 let lightboxIndex = 0;
 let renamePersonId = null;
 
-// ── Auth ──────────────────────────────────────────────────
+// ── Device Pairing Auth ───────────────────────────────────
+
+function getOrCreateDeviceId() {
+  let did = localStorage.getItem('pm_device_id');
+  if (!did) {
+    did = 'web-' + crypto.randomUUID();
+    localStorage.setItem('pm_device_id', did);
+  }
+  return did;
+}
+
+function showLoginPanel(id) {
+  ['loginRequest','loginPending','loginApproved'].forEach(p => {
+    document.getElementById(p).style.display = p === id ? '' : 'none';
+  });
+  document.getElementById('loginOverlay').classList.add('show');
+}
+
+function hideLoginOverlay() {
+  document.getElementById('loginOverlay').classList.remove('show');
+}
+
+let _pollTimer = null;
 
 async function checkAuth() {
   try {
     const r = await fetch(`${API}/auth_check`);
-    if (r.ok) {
-      document.getElementById('loginOverlay').classList.remove('show');
+    const d = await r.json();
+    if (d.authenticated) {
+      hideLoginOverlay();
+      if (_pollTimer) { clearInterval(_pollTimer); _pollTimer = null; }
       return true;
-    } else {
-      document.getElementById('loginOverlay').classList.add('show');
-      return false;
     }
+    // 未认证 — 检查本设备是否已在 pending/approved
+    if (d.mode === 'pairing') {
+      const did = getOrCreateDeviceId();
+      const s = await fetch(`${API}/pair/status?device_id=${encodeURIComponent(did)}`);
+      const sd = await s.json();
+      if (sd.status === 'pending') {
+        showLoginPanel('loginPending');
+        document.getElementById('pendingDeviceName').textContent =
+          '设备 ID: ' + did.slice(0, 16) + '...';
+        startPollApproval();
+      } else if (sd.status === 'approved') {
+        localStorage.setItem('pm_token', sd.token);
+        showLoginPanel('loginApproved');
+      } else if (sd.status === 'revoked') {
+        document.getElementById('requestError').textContent = '此设备已被吊销，请联系管理员';
+        document.getElementById('requestError').style.display = 'block';
+        showLoginPanel('loginRequest');
+      } else {
+        showLoginPanel('loginRequest');
+      }
+    }
+    return false;
   } catch(e) {
-    // API 不可达，不阻止加载
-    return true;
+    return true; // API 不可达，不阻断
+  }
+}
+
+function startPollApproval() {
+  if (_pollTimer) return;
+  _pollTimer = setInterval(async () => {
+    const did = getOrCreateDeviceId();
+    const r = await fetch(`${API}/pair/status?device_id=${encodeURIComponent(did)}`);
+    const d = await r.json();
+    if (d.status === 'approved') {
+      localStorage.setItem('pm_token', d.token);
+      clearInterval(_pollTimer); _pollTimer = null;
+      showLoginPanel('loginApproved');
+    } else if (d.status === 'revoked') {
+      clearInterval(_pollTimer); _pollTimer = null;
+      showLoginPanel('loginRequest');
+    }
+  }, 3000);
+}
+
+async function submitPairRequest() {
+  const name = document.getElementById('deviceNameInput').value.trim()
+    || navigator.userAgent.slice(0, 30);
+  const did = getOrCreateDeviceId();
+  const errEl = document.getElementById('requestError');
+  errEl.style.display = 'none';
+  const r = await fetch(`${API}/pair/request`, {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({device_id: did, device_name: name}),
+  });
+  const d = await r.json();
+  if (d.status === 'pending' || d.status === 'already_paired') {
+    document.getElementById('pendingDeviceName').textContent = `设备: ${name}`;
+    showLoginPanel('loginPending');
+    startPollApproval();
+  } else if (d.error) {
+    errEl.textContent = d.error;
+    errEl.style.display = 'block';
   }
 }
 
 async function submitLogin() {
-  const token = document.getElementById('loginTokenInput').value.trim();
-  if (!token) return;
+  const token = document.getElementById('loginTokenInput').value.trim()
+    || localStorage.getItem('pm_token') || '';
+  const did = getOrCreateDeviceId();
   const errEl = document.getElementById('loginError');
   errEl.style.display = 'none';
-  try {
-    const r = await fetch(`${API}/login`, {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({token}),
-    });
-    if (r.ok) {
-      document.getElementById('loginOverlay').classList.remove('show');
-      document.getElementById('loginTokenInput').value = '';
-      init();
-    } else {
-      errEl.style.display = 'block';
-    }
-  } catch(e) {
-    errEl.textContent = '连接失败，请检查服务是否运行';
+  const r = await fetch(`${API}/login`, {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({device_id: did, token}),
+  });
+  if (r.ok) {
+    localStorage.setItem('pm_token', token);
+    hideLoginOverlay();
+    init();
+  } else {
     errEl.style.display = 'block';
   }
 }

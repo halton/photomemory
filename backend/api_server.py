@@ -20,48 +20,98 @@ from flask import Flask, jsonify, request, send_file, abort, make_response
 from flask_cors import CORS
 from PIL import Image
 
-# ── Token 认证 ────────────────────────────────────────────
-ACCESS_TOKEN = None          # 启动时从 --token 或环境变量设置
+# ── Device Pairing 认证（类 OpenClaw 方案）─────────────────
+#
+# 流程:
+#   1. 客户端 POST /api/pair/request {device_id, device_name}
+#   2. 服务端存入 pending，管理员调 POST /api/pair/approve 审批
+#   3. 审批后颁发绑定 device_id 的 token
+#   4. 后续请求 Header: Authorization: Bearer <token>
+#                        X-Device-ID: <device_id>
+#      缺任意一个或 device_id 不匹配 → 401
+#
+# 管理员用 ADMIN_TOKEN 调审批/列表/吊销接口。
+# ADMIN_TOKEN 通过 --admin-token 或 PM_ADMIN_TOKEN 环境变量设置。
+# 未设置任何 token 时，本地开放访问。
+
+ADMIN_TOKEN = None           # 管理员 token（审批设备用）
+PAIRING_ENABLED = False      # 启动时根据 --admin-token 自动开启
 SESSION_COOKIE = "pm_session"
-SESSION_TTL_HOURS = 720      # 30天免重登
+SESSION_TTL_HOURS = 720      # 30天 cookie
 
-# 已授权的 session tokens（内存存储，重启失效）
-_valid_sessions: dict[str, datetime] = {}
+# 设备存储（生产可换 JSON 文件持久化；这里内存+文件双写）
+_DEVICES_FILE: Path = None   # 初始化时设置
 
-def _check_auth() -> bool:
-    """验证请求是否已授权"""
-    if not ACCESS_TOKEN:
-        return True  # 未设置 token，本地模式不验证
+def _load_devices() -> dict:
+    if _DEVICES_FILE and _DEVICES_FILE.exists():
+        try:
+            return json.loads(_DEVICES_FILE.read_text())
+        except Exception:
+            pass
+    return {"paired": {}, "pending": {}}
 
-    # 1. Bearer token（API客户端/Chat工具用）
-    auth = request.headers.get("Authorization", "")
-    if auth.startswith("Bearer "):
-        token = auth[7:]
-        if secrets.compare_digest(token, ACCESS_TOKEN):
-            return True
+def _save_devices(data: dict):
+    if _DEVICES_FILE:
+        _DEVICES_FILE.write_text(json.dumps(data, indent=2, default=str))
 
-    # 2. Session cookie（浏览器登录后）
-    session = request.cookies.get(SESSION_COOKIE, "")
-    if session and session in _valid_sessions:
-        if datetime.now() < _valid_sessions[session]:
-            return True
+# 内存缓存（启动时从文件加载）
+_devices: dict = {"paired": {}, "pending": {}}
+
+# Session cookie → device_id 映射（内存，重启失效）
+_sessions = {}   # session_id → (device_id, expiry)
+
+
+def _get_request_device_id():
+    return (request.headers.get("X-Device-ID") or
+            request.args.get("device_id") or
+            request.cookies.get("pm_device_id"))
+
+def _check_auth():
+    """验证请求。返回 (ok, device_id|'open')"""
+    if not PAIRING_ENABLED:
+        return True, "open"
+
+    # 1. Session cookie（浏览器登录后免重输）
+    sid = request.cookies.get(SESSION_COOKIE, "")
+    if sid and sid in _sessions:
+        did, expiry = _sessions[sid]
+        if datetime.now() < expiry:
+            return True, did
         else:
-            _valid_sessions.pop(session, None)
+            _sessions.pop(sid, None)
 
-    # 3. URL 参数 token（扫码/分享链接用）
-    url_token = request.args.get("token", "")
-    if url_token and secrets.compare_digest(url_token, ACCESS_TOKEN):
-        return True
+    # 2. Bearer token + device_id（API / 原生客户端）
+    auth = request.headers.get("Authorization", "")
+    device_id = _get_request_device_id()
+    if auth.startswith("Bearer ") and device_id:
+        token = auth[7:]
+        paired = _devices["paired"].get(device_id)
+        if paired and paired.get("status") == "active":
+            if secrets.compare_digest(token, paired["token"]):
+                return True, device_id
 
-    return False
+    return False, ""
 
 def require_auth(f):
-    """装饰器：对 API 路由强制验证"""
     from functools import wraps
     @wraps(f)
     def wrapper(*args, **kwargs):
-        if not _check_auth():
+        ok, _ = _check_auth()
+        if not ok:
             return jsonify({"error": "Unauthorized", "code": 401}), 401
+        return f(*args, **kwargs)
+    return wrapper
+
+def require_admin(f):
+    from functools import wraps
+    @wraps(f)
+    def wrapper(*args, **kwargs):
+        if not ADMIN_TOKEN:
+            return jsonify({"error": "Admin not configured"}), 403
+        auth = request.headers.get("Authorization", "")
+        token = auth[7:] if auth.startswith("Bearer ") else ""
+        if not token or not secrets.compare_digest(token, ADMIN_TOKEN):
+            return jsonify({"error": "Forbidden"}), 403
         return f(*args, **kwargs)
     return wrapper
 
@@ -98,33 +148,148 @@ CORS(app)
 def index():
     return app.send_static_file("index.html")
 
-# ── 登录接口 ──────────────────────────────────────────────
+# ── Pairing 接口 ──────────────────────────────────────────
 
-@app.route("/api/login", methods=["POST"])
-def login():
+@app.route("/api/pair/request", methods=["POST"])
+def pair_request():
+    """设备申请配对（任何人可调，不需认证）"""
     data = request.get_json() or {}
-    token = data.get("token", "").strip()
-    if not ACCESS_TOKEN:
-        return jsonify({"ok": True, "message": "no auth required"})
-    if not token or not secrets.compare_digest(token, ACCESS_TOKEN):
-        return jsonify({"error": "Invalid token"}), 401
-    # 生成 session
-    session_id = secrets.token_urlsafe(32)
-    _valid_sessions[session_id] = datetime.now() + timedelta(hours=SESSION_TTL_HOURS)
-    resp = make_response(jsonify({"ok": True}))
-    resp.set_cookie(SESSION_COOKIE, session_id,
-                    max_age=SESSION_TTL_HOURS * 3600,
-                    httponly=True, samesite="Lax")
-    return resp
+    device_id = data.get("device_id", "").strip()
+    device_name = data.get("device_name", "Unknown Device").strip()
+    if not device_id:
+        return jsonify({"error": "device_id required"}), 400
+    if not PAIRING_ENABLED:
+        return jsonify({"error": "Pairing not enabled"}), 503
+
+    # 已配对直接返回（重复申请幂等）
+    if device_id in _devices["paired"]:
+        d = _devices["paired"][device_id]
+        if d.get("status") == "active":
+            return jsonify({"status": "already_paired", "device_id": device_id})
+        elif d.get("status") == "revoked":
+            return jsonify({"status": "revoked", "message": "此设备已被吊销"}), 403
+
+    # 已在 pending 中
+    if device_id in _devices["pending"]:
+        return jsonify({"status": "pending", "message": "等待管理员审批"})
+
+    # 新申请
+    _devices["pending"][device_id] = {
+        "device_id": device_id,
+        "device_name": device_name,
+        "requested_at": datetime.now().isoformat(),
+        "ip": request.remote_addr,
+    }
+    _save_devices(_devices)
+    print(f"[Pairing] 新设备申请: {device_name} ({device_id}) from {request.remote_addr}")
+    print(f"[Pairing] 审批命令: curl -X POST http://localhost:8765/api/pair/approve "
+          f"-H 'Authorization: Bearer <admin_token>' -d '{{\"device_id\":\"{device_id}\"}}'")
+    return jsonify({"status": "pending", "message": "申请已提交，等待管理员审批"})
+
+
+@app.route("/api/pair/status", methods=["GET"])
+def pair_status():
+    """客户端轮询自己的配对状态"""
+    device_id = _get_request_device_id()
+    if not device_id:
+        return jsonify({"error": "device_id required"}), 400
+    if not PAIRING_ENABLED:
+        return jsonify({"status": "open"})
+    if device_id in _devices["pending"]:
+        return jsonify({"status": "pending"})
+    if device_id in _devices["paired"]:
+        d = _devices["paired"][device_id]
+        if d["status"] == "active":
+            # 颁发 token（只在 status 轮询时返回一次，之后 token 已在 paired 记录）
+            return jsonify({"status": "approved", "token": d["token"]})
+        elif d["status"] == "revoked":
+            return jsonify({"status": "revoked"}), 403
+    return jsonify({"status": "not_found"}), 404
+
+
+@app.route("/api/pair/approve", methods=["POST"])
+@require_admin
+def pair_approve():
+    """管理员审批设备（需 admin token）"""
+    data = request.get_json() or {}
+    device_id = data.get("device_id", "").strip()
+    if not device_id:
+        return jsonify({"error": "device_id required"}), 400
+    if device_id not in _devices["pending"]:
+        return jsonify({"error": "device not found in pending"}), 404
+
+    pending = _devices["pending"].pop(device_id)
+    token = secrets.token_urlsafe(32)
+    _devices["paired"][device_id] = {
+        **pending,
+        "token": token,
+        "status": "active",
+        "approved_at": datetime.now().isoformat(),
+    }
+    _save_devices(_devices)
+    print(f"[Pairing] ✅ 已批准: {pending['device_name']} ({device_id})")
+    return jsonify({"ok": True, "device_id": device_id, "device_name": pending["device_name"]})
+
+
+@app.route("/api/pair/revoke", methods=["POST"])
+@require_admin
+def pair_revoke():
+    """管理员吊销设备"""
+    data = request.get_json() or {}
+    device_id = data.get("device_id", "").strip()
+    if device_id in _devices["paired"]:
+        _devices["paired"][device_id]["status"] = "revoked"
+        _save_devices(_devices)
+        return jsonify({"ok": True})
+    return jsonify({"error": "device not found"}), 404
+
+
+@app.route("/api/pair/list", methods=["GET"])
+@require_admin
+def pair_list():
+    """管理员查看所有设备"""
+    def safe(d):
+        return {k: v for k, v in d.items() if k != "token"}
+    return jsonify({
+        "pending": [safe(v) for v in _devices["pending"].values()],
+        "paired":  [safe(v) for v in _devices["paired"].values()],
+    })
+
 
 @app.route("/api/auth_check")
 def auth_check():
-    """前端用来检测是否已登录"""
-    if not ACCESS_TOKEN:
+    ok, device_id = _check_auth()
+    if not PAIRING_ENABLED:
         return jsonify({"authenticated": True, "mode": "open"})
-    if _check_auth():
-        return jsonify({"authenticated": True, "mode": "token"})
-    return jsonify({"authenticated": False}), 401
+    if ok:
+        return jsonify({"authenticated": True, "mode": "paired", "device_id": device_id})
+    return jsonify({"authenticated": False, "mode": "pairing"}), 401
+
+
+@app.route("/api/login", methods=["POST"])
+def login():
+    """浏览器配对：提交 token+device_id 换取 session cookie"""
+    data = request.get_json() or {}
+    device_id = data.get("device_id", "").strip()
+    token = data.get("token", "").strip()
+    if not PAIRING_ENABLED:
+        return jsonify({"ok": True})
+    if not device_id or not token:
+        return jsonify({"error": "device_id and token required"}), 400
+    paired = _devices["paired"].get(device_id)
+    if not paired or paired.get("status") != "active":
+        return jsonify({"error": "Device not approved"}), 401
+    if not secrets.compare_digest(token, paired["token"]):
+        return jsonify({"error": "Invalid token"}), 401
+    # 颁发 session cookie
+    sid = secrets.token_urlsafe(32)
+    _sessions[sid] = (device_id, datetime.now() + timedelta(hours=SESSION_TTL_HOURS))
+    resp = make_response(jsonify({"ok": True}))
+    resp.set_cookie(SESSION_COOKIE, sid, max_age=SESSION_TTL_HOURS * 3600,
+                    httponly=True, samesite="Lax")
+    resp.set_cookie("pm_device_id", device_id, max_age=SESSION_TTL_HOURS * 3600,
+                    samesite="Lax")
+    return resp
 
 DB_PATH = None
 
@@ -563,23 +728,40 @@ def health():
 # ── 主入口 ────────────────────────────────────────────────
 
 if __name__ == "__main__":
+    import sys
     parser = argparse.ArgumentParser()
     parser.add_argument("--db", default="./photomemory.db")
     parser.add_argument("--port", type=int, default=8765)
     parser.add_argument("--host", default="0.0.0.0")
-    parser.add_argument("--token", default=os.environ.get("PM_TOKEN", ""),
-                        help="访问 token（留空则不验证，适合纯局域网）")
+    parser.add_argument("--admin-token", default=os.environ.get("PM_ADMIN_TOKEN", ""),
+                        help="管理员 token（审批/吊销设备用）；设置后自动启用 Pairing 认证")
     args = parser.parse_args()
 
     DB_PATH = os.path.abspath(args.db)
-    ACCESS_TOKEN = args.token or None
+    _admin = args.admin_token or None
+    _pairing = bool(_admin)
+
+    # 更新模块级变量（供装饰器/函数使用）
+    import __main__ as _m
+    _m.ADMIN_TOKEN = _admin
+    _m.PAIRING_ENABLED = _pairing
+    _m.DB_PATH = DB_PATH
+    globals()['ADMIN_TOKEN'] = _admin
+    globals()['PAIRING_ENABLED'] = _pairing
+    globals()['DB_PATH'] = DB_PATH
+
+    # 设备持久化文件（与 DB 同目录）
+    _DEVICES_FILE = Path(DB_PATH).parent / "photomemory_devices.json"
+    globals()['_DEVICES_FILE'] = _DEVICES_FILE
+    _devices.update(_load_devices())
 
     print(f"🚀 PhotoMemory API 启动")
     print(f"   DB    : {DB_PATH}")
     print(f"   URL   : http://localhost:{args.port}")
-    if ACCESS_TOKEN:
-        print(f"   Token : {ACCESS_TOKEN}")
-        print(f"   Auth  : ✅ Bearer Token 已启用")
+    if PAIRING_ENABLED:
+        print(f"   Auth  : ✅ Device Pairing 已启用")
+        print(f"   Admin : {ADMIN_TOKEN}")
+        print(f"   设备数: {len(_devices['paired'])} 已配对, {len(_devices['pending'])} 待审批")
     else:
-        print(f"   Auth  : ⚠️  未设置 token，局域网开放访问")
+        print(f"   Auth  : ⚠️  未设置 --admin-token，开放访问")
     app.run(host=args.host, port=args.port, debug=False)
