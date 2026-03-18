@@ -18,6 +18,12 @@ from datetime import datetime, timedelta
 
 from flask import Flask, jsonify, request, send_file, abort, make_response, redirect
 from flask_cors import CORS
+
+try:
+    import pillow_heif
+    pillow_heif.register_heif_opener()
+except ImportError:
+    pass  # HEIC support unavailable
 from PIL import Image
 
 # ── Device Pairing 认证（类 OpenClaw 方案）─────────────────
