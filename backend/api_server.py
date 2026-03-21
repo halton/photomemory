@@ -77,6 +77,11 @@ def _check_auth():
     if not PAIRING_ENABLED:
         return True, "open"
 
+    # localhost 直接放行（127.0.0.1 / ::1）
+    remote = request.remote_addr or ""
+    if remote in ("127.0.0.1", "::1", "localhost"):
+        return True, "localhost"
+
     # 1. Bearer token + device_id（优先，API / 原生客户端 / 浏览器）
     auth = request.headers.get("Authorization", "")
     device_id = request.headers.get("X-Device-ID", "") or request.args.get("device_id", "")
