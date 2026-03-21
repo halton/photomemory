@@ -15,6 +15,7 @@ import secrets
 import hashlib
 from pathlib import Path
 from datetime import datetime, timedelta
+import threading
 
 from flask import Flask, jsonify, request, send_file, abort, make_response, redirect
 from flask_cors import CORS
@@ -42,8 +43,13 @@ from PIL import Image
 
 ADMIN_TOKEN = None           # 管理员 token（审批设备用）
 PAIRING_ENABLED = False      # 启动时根据 --admin-token 自动开启
+
+# 人脸扫描进度（线程共享）
+_face_scan_state: dict = {"running": False, "total": 0, "processed": 0, "error": None}
 SESSION_COOKIE = "pm_session"
 SESSION_TTL_HOURS = 720      # 30天 cookie
+
+_face_scan_state = {"running": False, "total": 0, "processed": 0, "error": None}
 
 # 设备存储（生产可换 JSON 文件持久化；这里内存+文件双写）
 _DEVICES_FILE: Path = None   # 初始化时设置
@@ -822,6 +828,111 @@ def list_directories():
     rows = conn.execute("SELECT * FROM directories ORDER BY added_at DESC").fetchall()
     conn.close()
     return jsonify({"directories": [dict(r) for r in rows]})
+
+
+# ── 删除照片 API ──────────────────────────────────────────
+
+@app.route("/api/photos/<int:photo_id>", methods=["DELETE"])
+@require_auth
+def delete_photo(photo_id):
+    conn = get_db()
+    row = conn.execute("SELECT path FROM photos WHERE id=?", (photo_id,)).fetchone()
+    if not row:
+        conn.close()
+        return jsonify({"error": "Not found"}), 404
+    conn.execute("DELETE FROM faces WHERE photo_id=?", (photo_id,))
+    conn.execute("DELETE FROM photos WHERE id=?", (photo_id,))
+    conn.commit()
+    conn.close()
+    return jsonify({"deleted": photo_id})
+
+
+# ── 删除人物 API ──────────────────────────────────────────
+
+@app.route("/api/persons/<int:person_id>", methods=["DELETE"])
+@require_auth
+def delete_person(person_id):
+    conn = get_db()
+    # 取消 faces 关联，但保留 faces 记录（便于重新聚类）
+    conn.execute("UPDATE faces SET person_id=NULL WHERE person_id=?", (person_id,))
+    conn.execute("DELETE FROM persons WHERE id=?", (person_id,))
+    conn.commit()
+    conn.close()
+    return jsonify({"deleted": person_id})
+
+
+# ── 一键清理 API ──────────────────────────────────────────
+
+@app.route("/api/cleanup/duplicates", methods=["POST"])
+@require_admin
+def cleanup_duplicates():
+    conn = get_db()
+    count = conn.execute("SELECT COUNT(*) FROM photos WHERE is_duplicate=1").fetchone()[0]
+    conn.execute("DELETE FROM faces WHERE photo_id IN (SELECT id FROM photos WHERE is_duplicate=1)")
+    conn.execute("DELETE FROM photos WHERE is_duplicate=1")
+    conn.commit()
+    conn.close()
+    return jsonify({"deleted": count})
+
+
+@app.route("/api/cleanup/screenshots", methods=["POST"])
+@require_admin
+def cleanup_screenshots():
+    conn = get_db()
+    count = conn.execute("SELECT COUNT(*) FROM photos WHERE is_screenshot=1").fetchone()[0]
+    conn.execute("DELETE FROM faces WHERE photo_id IN (SELECT id FROM photos WHERE is_screenshot=1)")
+    conn.execute("DELETE FROM photos WHERE is_screenshot=1")
+    conn.commit()
+    conn.close()
+    return jsonify({"deleted": count})
+
+
+# ── 增量人脸扫描 API ──────────────────────────────────────
+
+@app.route("/api/face_scan", methods=["POST"])
+@require_auth
+def start_face_scan():
+    global _face_scan_state
+    if _face_scan_state["running"]:
+        return jsonify({"status": "already_running",
+                        "processed": _face_scan_state["processed"],
+                        "total": _face_scan_state["total"]})
+
+    db_path = DB_PATH
+    conn = get_db()
+    IMAGE_EXTS = ('.jpg', '.jpeg', '.png', '.heic', '.heif', '.bmp', '.tiff', '.tif')
+    already = {r[0] for r in conn.execute("SELECT DISTINCT photo_id FROM faces").fetchall()}
+    all_photos = conn.execute("SELECT id, path FROM photos WHERE is_screenshot=0").fetchall()
+    pending = [(pid, path) for pid, path in all_photos
+               if pid not in already and Path(path).suffix.lower() in IMAGE_EXTS]
+    conn.close()
+
+    _face_scan_state = {"running": True, "total": len(pending), "processed": 0, "error": None}
+
+    def run_scan():
+        global _face_scan_state
+        import sys
+        scripts_dir = str(Path(__file__).parent.parent / "scripts")
+        if scripts_dir not in sys.path:
+            sys.path.insert(0, scripts_dir)
+        try:
+            from phase2_faces import detect_faces, cluster_faces
+            detect_faces(db_path)
+            cluster_faces(db_path)
+        except Exception as e:
+            _face_scan_state["error"] = str(e)
+        finally:
+            _face_scan_state["running"] = False
+
+    t = threading.Thread(target=run_scan, daemon=True)
+    t.start()
+    return jsonify({"status": "started", "new_photos": len(pending)})
+
+
+@app.route("/api/face_scan/status", methods=["GET"])
+@require_auth
+def face_scan_status():
+    return jsonify(_face_scan_state)
 
 
 # ── 健康检查 ──────────────────────────────────────────────

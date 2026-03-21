@@ -171,14 +171,16 @@ def detect_faces(db_path: str, limit=None):
 
 def cluster_faces(db_path: str, eps=0.6, min_samples=2):
     """
-    用 DBSCAN 对所有未分配人物的人脸聚类。
-    eps: 相似度阈值（越小越严格，0.3-0.5 合适）
+    增量聚类：只处理 person_id IS NULL 的人脸。
+    优先尝试合并到已有 person（通过 centroid 相似度），否则新建 person。
+    eps: 余弦距离阈值（越小越严格，0.3-0.5 合适）
     min_samples: 同一人至少出现几次才独立成一个 person
     """
     conn = sqlite3.connect(db_path)
     init_face_tables(conn)
     c = conn.cursor()
 
+    # 只聚类未分配的人脸
     rows = c.execute("""
         SELECT id, embedding FROM faces
         WHERE person_id IS NULL AND embedding IS NOT NULL
@@ -186,23 +188,37 @@ def cluster_faces(db_path: str, eps=0.6, min_samples=2):
 
     if not rows:
         print("没有未聚类的人脸。")
+        conn.close()
         return
 
-    print(f"\n🧩 对 {len(rows)} 张人脸进行聚类（eps={eps}）...")
+    print(f"\n🧩 对 {len(rows)} 张新人脸进行增量聚类（eps={eps}）...")
 
     face_ids = [r[0] for r in rows]
     embeddings = np.array([np.frombuffer(r[1], dtype=np.float32) for r in rows])
     embeddings = normalize(embeddings)
 
-    # 余弦距离 DBSCAN
+    # DBSCAN 聚类新人脸
     clustering = DBSCAN(eps=eps, min_samples=min_samples, metric='cosine').fit(embeddings)
     labels = clustering.labels_
 
     unique_labels = set(labels) - {-1}
-    print(f"  发现 {len(unique_labels)} 个人物聚类，{sum(labels==-1)} 张孤立人脸")
+    print(f"  发现 {len(unique_labels)} 个新聚类，{sum(labels==-1)} 张孤立人脸")
 
     now = datetime.now().isoformat()
     label_to_person = {}
+
+    # 加载已有 persons 的 centroid，用于匹配
+    existing_persons = c.execute("""
+        SELECT id, embedding_centroid FROM persons
+        WHERE embedding_centroid IS NOT NULL
+    """).fetchall()
+    existing_ids = [r[0] for r in existing_persons]
+    existing_centroids = (
+        normalize(np.array([np.frombuffer(r[1], dtype=np.float32) for r in existing_persons]))
+        if existing_persons else np.array([])
+    )
+
+    MERGE_THRESHOLD = 0.35  # 余弦距离 < 这个值则认为是同一人
 
     for label in unique_labels:
         mask = labels == label
@@ -211,12 +227,36 @@ def cluster_faces(db_path: str, eps=0.6, min_samples=2):
         centroid = centroid / np.linalg.norm(centroid)
         face_count = int(mask.sum())
 
-        c.execute("""
-            INSERT INTO persons (embedding_centroid, face_count, created_at, updated_at)
-            VALUES (?,?,?,?)
-        """, (centroid.astype(np.float32).tobytes(), face_count, now, now))
-        person_id = c.lastrowid
-        label_to_person[label] = person_id
+        # 尝试与已有 persons 合并
+        merged_person_id = None
+        if len(existing_centroids) > 0:
+            distances = 1 - existing_centroids.dot(centroid)  # cosine distance
+            min_idx = int(np.argmin(distances))
+            if distances[min_idx] < MERGE_THRESHOLD:
+                merged_person_id = existing_ids[min_idx]
+
+        if merged_person_id:
+            # 合并到已有 person，更新 centroid 和 face_count
+            old_centroid_bytes = c.execute(
+                "SELECT embedding_centroid, face_count FROM persons WHERE id=?",
+                (merged_person_id,)
+            ).fetchone()
+            old_count = old_centroid_bytes[1] if old_centroid_bytes else 0
+            old_emb = np.frombuffer(old_centroid_bytes[0], dtype=np.float32) if old_centroid_bytes else centroid
+            # 加权平均更新 centroid
+            new_count = old_count + face_count
+            new_centroid = (old_emb * old_count + centroid * face_count) / new_count
+            new_centroid = new_centroid / np.linalg.norm(new_centroid)
+            c.execute("UPDATE persons SET embedding_centroid=?, face_count=?, updated_at=? WHERE id=?",
+                      (new_centroid.astype(np.float32).tobytes(), new_count, now, merged_person_id))
+            label_to_person[label] = merged_person_id
+        else:
+            # 新建 person
+            c.execute("""
+                INSERT INTO persons (embedding_centroid, face_count, created_at, updated_at)
+                VALUES (?,?,?,?)
+            """, (centroid.astype(np.float32).tobytes(), face_count, now, now))
+            label_to_person[label] = c.lastrowid
 
     # 分配 person_id
     for face_id, label in zip(face_ids, labels):
@@ -225,8 +265,11 @@ def cluster_faces(db_path: str, eps=0.6, min_samples=2):
                       (label_to_person[label], face_id))
 
     conn.commit()
-    print(f"✅ 聚类完成，新建 {len(unique_labels)} 个待命名人物")
-    print("  下一步: python3 phase2_faces.py --db <db> --label  (交互式命名)")
+    conn.close()
+    new_persons = len([v for v in label_to_person.values()
+                       if v not in existing_ids])
+    merged_count = len(unique_labels) - new_persons
+    print(f"✅ 增量聚类完成：新建 {new_persons} 个人物，合并到已有人物 {merged_count} 个")
 
 
 # ── 人物命名 ──────────────────────────────────────────────

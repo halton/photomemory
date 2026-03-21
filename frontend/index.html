@@ -309,6 +309,10 @@
         </select>
       </div>
       <div class="stats-bar" id="statsBar">加载中...</div>
+      <div id="cleanupBar" style="display:none;padding:6px 16px;background:#141414;border-bottom:1px solid #222;gap:8px;display:none">
+        <button id="btnCleanDup" onclick="cleanupDuplicates()" style="background:none;border:1px solid rgba(239,68,68,0.4);color:#ef4444;border-radius:6px;padding:4px 12px;cursor:pointer;font-size:12px">🗑️ 清理重复</button>
+        <button id="btnCleanSS" onclick="cleanupScreenshots()" style="background:none;border:1px solid rgba(239,68,68,0.4);color:#ef4444;border-radius:6px;padding:4px 12px;cursor:pointer;font-size:12px">🗑️ 清理截图</button>
+      </div>
 
       <!-- Photos view -->
       <div id="photosView">
@@ -320,6 +324,11 @@
 
       <!-- Persons view -->
       <div id="personsView" style="display:none">
+        <div style="padding:12px 16px;border-bottom:1px solid #222;display:flex;align-items:center;gap:12px">
+          <button class="btn" id="btnFaceScan" onclick="startFaceScan()" style="font-size:12px;padding:6px 14px">🔍 识别新照片</button>
+          <span id="faceScanStatus" style="display:none;color:#aaa;font-size:12px"></span>
+          <button onclick="deletePersonPrompt(currentPersonCard)" id="btnDeletePerson" style="display:none;margin-left:auto;background:none;border:1px solid rgba(239,68,68,0.4);color:#ef4444;border-radius:6px;padding:5px 12px;cursor:pointer;font-size:12px">🗑️ 删除人物</button>
+        </div>
         <div class="persons-grid" id="personsGrid"></div>
       </div>
     </div>
@@ -362,6 +371,7 @@
     <div class="lb-actions">
       <a id="lbDownload" href="#" target="_blank">⬇ 原图</a>
       <a id="lbOpenMaps" href="#" target="_blank" style="display:none">🗺 地图</a>
+      <button onclick="deleteCurrentPhoto()" style="background:none;border:none;color:#ef4444;cursor:pointer;font-size:13px;padding:6px 10px;border-radius:6px;border:1px solid rgba(239,68,68,0.3);">🗑️ 删除</button>
     </div>
   </div>
 </div>
@@ -688,6 +698,14 @@ async function loadStats() {
   document.getElementById('count-no_screenshots').textContent =
     (r.total_photos - r.screenshots).toLocaleString();
   document.getElementById('count-duplicates').textContent = r.duplicates.toLocaleString();
+
+  // 清理按钮（仅在有数据时显示）
+  const cleanupBar = document.getElementById('cleanupBar');
+  const dupBtn = document.getElementById('btnCleanDup');
+  const ssBtn = document.getElementById('btnCleanSS');
+  if (dupBtn) { dupBtn.textContent = `🗑️ 清理重复 (${r.duplicates}张)`; dupBtn.dataset.count = r.duplicates; }
+  if (ssBtn) { ssBtn.textContent = `🗑️ 清理截图 (${r.screenshots}张)`; ssBtn.dataset.count = r.screenshots; }
+  if (cleanupBar) cleanupBar.style.display = (r.duplicates > 0 || r.screenshots > 0) ? 'flex' : 'none';
 }
 
 // ── Years ─────────────────────────────────────────────────
@@ -959,7 +977,12 @@ async function loadPersonsView() {
            onerror="this.style.background='#333';this.src=''">
       <div class="pname">${p.name || '未命名'}</div>
       <div class="pcount">${p.face_count} 张照片</div>
-      <div class="pedit">✏️ 点击命名 / 浏览</div>`;
+      <div class="pedit">✏️ 点击命名 / 浏览</div>
+      <button onclick="deletePersonFromView(${p.id}, '${(p.name||'').replace(/'/g,"\\'") }', event)"
+        style="position:absolute;top:8px;right:8px;background:none;border:none;color:transparent;cursor:pointer;font-size:14px;padding:2px 5px;border-radius:4px"
+        onmouseenter="this.style.color='#ef4444'" onmouseleave="this.style.color='transparent'"
+        title="删除人物">🗑️</button>`;
+    card.style.position = 'relative';
     card.onclick = () => openPersonBrowse(p);
     grid.appendChild(card);
   });
@@ -1070,6 +1093,127 @@ document.getElementById('searchInput').addEventListener('keydown', e => {
 document.getElementById('pbNameInput').addEventListener('keydown', e => {
   if (e.key === 'Enter') submitPersonBrowseName();
 });
+
+// ── 删除照片 ──────────────────────────────────────────────
+
+async function deleteCurrentPhoto() {
+  const p = currentResults[lightboxIndex];
+  if (!p) return;
+  const name = p.filename || p.path || `ID:${p.id}`;
+  if (!confirm(`确定要从相册中移除这张照片的记录吗？\n\n${name}\n\n（不会删除磁盘上的实际文件）`)) return;
+  const r = await apiFetch(`/photos/${p.id}`, { method: 'DELETE' });
+  if (r.ok) {
+    closeLightbox();
+    currentResults.splice(lightboxIndex, 1);
+    doSearch();
+    loadStats();
+  } else {
+    alert('删除失败，请重试');
+  }
+}
+
+// ── 删除人物 ──────────────────────────────────────────────
+
+let currentPersonCard = null;
+
+async function deletePersonFromView(personId, personName, e) {
+  e?.stopPropagation();
+  if (!confirm(`确定要删除人物「${personName || '未命名'}」吗？\n\n相关人脸记录将取消关联，不会被删除。`)) return;
+  const r = await apiFetch(`/persons/${personId}`, { method: 'DELETE' });
+  if (r.ok) {
+    loadPersonsView();
+    loadPersonsSidebar();
+  } else {
+    alert('删除失败');
+  }
+}
+
+// ── 清理工具 ──────────────────────────────────────────────
+
+async function cleanupDuplicates() {
+  const btn = document.getElementById('btnCleanDup');
+  const count = btn?.dataset.count || '?';
+  if (!confirm(`确定删除 ${count} 张重复图片的数据库记录吗？\n\n（不会删除磁盘上的实际文件）`)) return;
+  const r = await apiFetch('/cleanup/duplicates', {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${window._adminToken || ''}` }
+  });
+  if (r.ok) {
+    const d = await r.json();
+    alert(`已清理 ${d.deleted} 条重复记录`);
+    loadStats();
+  } else {
+    alert('清理失败，需要管理员权限');
+  }
+}
+
+async function cleanupScreenshots() {
+  const btn = document.getElementById('btnCleanSS');
+  const count = btn?.dataset.count || '?';
+  if (!confirm(`确定删除 ${count} 张截图的数据库记录吗？\n\n（不会删除磁盘上的实际文件）`)) return;
+  const r = await apiFetch('/cleanup/screenshots', {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${window._adminToken || ''}` }
+  });
+  if (r.ok) {
+    const d = await r.json();
+    alert(`已清理 ${d.deleted} 条截图记录`);
+    loadStats();
+  } else {
+    alert('清理失败，需要管理员权限');
+  }
+}
+
+// ── 增量人脸识别 ──────────────────────────────────────────
+
+let _faceScanTimer = null;
+
+async function startFaceScan() {
+  const btn = document.getElementById('btnFaceScan');
+  const statusEl = document.getElementById('faceScanStatus');
+  btn.disabled = true;
+  statusEl.style.display = '';
+  statusEl.textContent = '请求中...';
+  const r = await apiFetch('/face_scan', { method: 'POST' });
+  const d = await r.json();
+  if (d.status === 'already_running') {
+    statusEl.textContent = '扫描进行中...';
+  } else if (d.new_photos === 0) {
+    statusEl.textContent = '没有新照片需要识别';
+    btn.disabled = false;
+    return;
+  } else {
+    statusEl.textContent = `开始扫描 ${d.new_photos} 张新照片...`;
+  }
+  pollFaceScan();
+}
+
+async function pollFaceScan() {
+  const statusEl = document.getElementById('faceScanStatus');
+  const btn = document.getElementById('btnFaceScan');
+  try {
+    const r = await apiFetch('/face_scan/status');
+    const d = await r.json();
+    if (d.running) {
+      statusEl.textContent = `识别中: ${d.processed}/${d.total}`;
+      _faceScanTimer = setTimeout(pollFaceScan, 3000);
+    } else if (d.error) {
+      statusEl.textContent = `出错: ${d.error}`;
+      btn.disabled = false;
+    } else {
+      statusEl.textContent = '识别完成！刷新中...';
+      btn.disabled = false;
+      setTimeout(() => {
+        loadPersonsView();
+        loadPersonsSidebar();
+        statusEl.style.display = 'none';
+      }, 1500);
+    }
+  } catch (e) {
+    statusEl.textContent = '状态查询失败';
+    btn.disabled = false;
+  }
+}
 </script>
 </body>
 </html>
