@@ -1,0 +1,59 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+*.egg
+.eggs/
+
+# Virtual env
+venv/
+.venv/
+env/
+.env
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+
+# PhotoMemory data
+photomemory.db
+*.db-shm
+*.db-wal
+thumbnails/
+cache/
+
+# Environment / secrets
+.env
+.env.local
+*.env
+config.local.py
+secrets.py
+
+# OS
+.DS_Store
+.DS_Store?
+._*
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Docker volumes
+docker/data/
+
+# Logs
+*.log
+logs/
+
+# Node (frontend if any)
+node_modules/
+.npm/
