@@ -20,6 +20,17 @@ API_PID=$!
 
 sleep 1.5
 
+# 启动 Cloudflare Tunnel（优先 Named Tunnel）
+if [ -f "$HOME/.cloudflared/config.yml" ]; then
+    echo "使用 Cloudflare Named Tunnel..."
+    cloudflared tunnel run photomemory &
+    TUNNEL_PID=$!
+else
+    echo "未检测到 config.yml，使用临时 Cloudflare Tunnel..."
+    cloudflared tunnel --url http://localhost:$PORT &
+    TUNNEL_PID=$!
+fi
+
 # 检查是否启动成功
 if curl -s "http://localhost:$PORT/api/health" > /dev/null 2>&1; then
     echo "✅ 服务启动成功 (PID: $API_PID)"

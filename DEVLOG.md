@@ -328,3 +328,27 @@ python3 backend/api_server.py \
 ---
 
 *最后更新：2026-03-16*
+
+---
+
+## 2026-04-08 开发记录
+
+### 新增功能
+
+#### Phase1 递归全量扫描
+- `scripts/phase1_index.py` 支持 `--photos-dir /Volumes/backup/photos/` 递归扫描所有子目录
+- 支持 JPG/PNG/HEIC/MOV/MP4 等格式（大小写不敏感）
+- 每 100 张输出进度：`[进度] x/total 已处理`
+- `--no-recursive` 选项保持向后兼容
+- git: `955210d`
+
+#### HEIC 缩略图修复
+- `backend/api_server.py` 顶部注册 `pillow_heif.register_heif_opener()`
+- 解决 HEIC 格式缩略图生成失败问题
+- git: `68f10e7`
+
+#### Cloudflare Named Tunnel 持久化
+- 新增 `scripts/setup_tunnel.sh`：引导完成 cloudflared login → tunnel create → config.yml → launchd plist
+- 更新 `start.sh`：自动检测 config.yml，决定走 Named Tunnel 还是临时 Tunnel
+- git: 本次提交
+
