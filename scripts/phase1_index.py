@@ -29,6 +29,9 @@ except ImportError:
 
 # 支持的图片格式
 IMAGE_EXTS = {'.jpg', '.jpeg', '.png', '.heic', '.heif', '.tiff', '.tif', '.bmp', '.gif', '.webp', '.mov', '.mp4'}
+# 递归扫描时匹配的扩展名（小写）
+RECURSIVE_EXTS = {'.jpg', '.jpeg', '.png', '.heic', '.mov', '.mp4'}
+
 
 # 截图特征（分辨率特征 + 目录名）
 SCREENSHOT_DIRS = {'screenshots', 'screen shot', 'screencapture', '截图', 'screenshot'}
@@ -190,7 +193,7 @@ def scan_directory(dir_path: str, label: str, conn: sqlite3.Connection, verbose=
             full_path = os.path.join(root, fname)
             total += 1
 
-            if verbose and total % 500 == 0:
+            if verbose and total % 100 == 0:
                 print(f"  已处理 {total} 张...")
 
             # 跳过已索引
@@ -318,9 +321,11 @@ def report_duplicates(conn: sqlite3.Connection, limit=50):
 
 def main():
     parser = argparse.ArgumentParser(description="PhotoMemory Phase 1 - 图片索引")
-    parser.add_argument("--dir", help="要扫描的目录路径")
+    parser.add_argument("--photos-dir", "--dir", dest="photos_dir", required=True, help="要扫描的根目录路径 (如 /Volumes/backup/photos/)")
     parser.add_argument("--label", default="", help="目录标签（如：家庭相册）")
     parser.add_argument("--db", default="./photomemory.db", help="数据库路径")
+    parser.add_argument("--no-recursive", dest="recursive", action="store_false", help="仅扫描指定单一目录，不递归 (默认递归)")
+    parser.set_defaults(recursive=True)
     parser.add_argument("--report-dups", action="store_true", help="显示重复图片报告")
     parser.add_argument("--stats", action="store_true", help="显示统计信息")
     args = parser.parse_args()
@@ -344,16 +349,96 @@ def main():
         print(f"   已索引目录: {dirs}")
         return
 
-    if not args.dir:
-        parser.print_help()
-        return
-
-    if not os.path.isdir(args.dir):
-        print(f"❌ 目录不存在: {args.dir}")
+    root = args.photos_dir
+    if not os.path.isdir(root):
+        print(f"❌ 目录不存在: {root}")
         sys.exit(1)
 
-    label = args.label or Path(args.dir).name
-    scan_directory(args.dir, label, conn)
+    def recursive_scan(root_dir, conn, verbose=True):
+        """
+        递归扫描 root_dir 下所有 RECURSIVE_EXTS 文件，支持大目录，进度显示。
+        """
+        all_files = []
+        for p in Path(root_dir).rglob('*'):
+            if p.is_file() and p.suffix.lower() in RECURSIVE_EXTS:
+                all_files.append(str(p))
+        total = len(all_files)
+        print(f"\n🔍 递归扫描 {root_dir}，共找到 {total} 文件")
+        processed = 0
+        batch = 100
+        label = args.label or Path(root_dir).name
+        now = datetime.now().isoformat()
+        c = conn.cursor()
+        hash_map = {}
+        for row in c.execute("SELECT file_hash, path FROM photos WHERE file_hash != ''"):
+            if row[0] not in hash_map:
+                hash_map[row[0]] = row[1]
+        new_count = 0
+        dup_count = 0
+        screenshot_count = 0
+        errors = 0
+        for idx, full_path in enumerate(all_files, 1):
+            processed += 1
+            if verbose and processed % batch == 0:
+                print(f"[进度] {processed}/{total} 已处理")
+            fname = os.path.basename(full_path)
+            ext = Path(fname).suffix.lower()
+            exists = c.execute("SELECT id FROM photos WHERE path=?", (full_path,)).fetchone()
+            if exists:
+                continue
+            try:
+                stat = os.stat(full_path)
+                fsize = stat.st_size
+            except Exception:
+                errors += 1
+                continue
+            fhash = compute_hash(full_path)
+            meta = parse_exif(full_path)
+            width, height = meta["width"], meta["height"]
+            screenshot = 1 if is_screenshot(full_path, width, height) else 0
+            if screenshot:
+                screenshot_count += 1
+            is_dup = 0
+            dup_of = None
+            if fhash and fhash in hash_map:
+                is_dup = 1
+                dup_of = hash_map[fhash]
+                dup_count += 1
+                row = c.execute("SELECT paths, count FROM duplicate_groups WHERE hash=?", (fhash,)).fetchone()
+                if row:
+                    paths = json.loads(row[0])
+                    paths.append(full_path)
+                    c.execute("UPDATE duplicate_groups SET paths=?, count=? WHERE hash=?",
+                              (json.dumps(paths, ensure_ascii=False), row[1]+1, fhash))
+                else:
+                    c.execute("INSERT INTO duplicate_groups(hash, paths, count) VALUES (?,?,?)",
+                              (fhash, json.dumps([hash_map[fhash], full_path], ensure_ascii=False), 2))
+            elif fhash:
+                hash_map[fhash] = full_path
+            gps_city = None
+            c.execute("""
+                INSERT OR IGNORE INTO photos
+                (path, filename, size, file_hash, taken_at, gps_lat, gps_lon, gps_city,
+                 width, height, is_screenshot, is_duplicate, duplicate_of, indexed_at, dir_label)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            """, (
+                full_path, fname, fsize, fhash,
+                meta["taken_at"], meta["gps_lat"], meta["gps_lon"], gps_city,
+                width, height,
+                screenshot, is_dup, dup_of,
+                now, label
+            ))
+            new_count += 1
+            if new_count % 200 == 0:
+                conn.commit()
+        conn.commit()
+        print(f"\n✅ 扫描完成: 共计 {total}，新增索引 {new_count}，重复 {dup_count}，截图 {screenshot_count}，错误 {errors}")
+
+    if args.recursive:
+        recursive_scan(root, conn)
+    else:
+        label = args.label or Path(root).name
+        scan_directory(root, label, conn)
 
 
 if __name__ == "__main__":
