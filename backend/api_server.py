@@ -928,6 +928,89 @@ def stats():
 
     return jsonify({
         "total_photos": total,
+    })
+
+
+@app.route("/api/photos/map", methods=["GET"])
+@require_auth
+def photos_map():
+    """返回所有有GPS坐标的照片"""
+    conn = get_db()
+    rows = conn.execute(
+        """
+        SELECT id, gps_lat, gps_lon, taken_at, filename, gps_city
+        FROM photos
+        WHERE gps_lat IS NOT NULL AND gps_lat != 0
+        """
+    ).fetchall()
+    markers = []
+    for r in rows:
+        markers.append({
+            "id": r["id"],
+            "lat": r["gps_lat"],
+            "lon": r["gps_lon"],
+            "taken_at": r["taken_at"],
+            "filename": r["filename"],
+            "city": r["gps_city"],
+            "thumb_url": f"/api/thumb/{r['id']}"
+        })
+    conn.close()
+    return jsonify({"markers": markers})
+
+
+@app.route("/api/stats/locations", methods=["GET"])
+@require_auth
+def stats_locations():
+    """按城市分组统计"""
+    conn = get_db()
+    rows = conn.execute(
+        """
+        SELECT gps_city, COUNT(*) as cnt, AVG(gps_lat) as lat, AVG(gps_lon) as lon
+        FROM photos
+        WHERE gps_city IS NOT NULL AND gps_city != ""
+        GROUP BY gps_city
+        ORDER BY cnt DESC
+        """
+    ).fetchall()
+    ret = []
+    for r in rows:
+        ret.append({
+            "city": r["gps_city"],
+            "count": r["cnt"],
+            "lat": r["lat"],
+            "lon": r["lon"]
+        })
+    conn.close()
+    return jsonify({"locations": ret})
+
+
+@app.route("/api/photos/random", methods=["GET"])
+@require_auth
+def api_photos_random():
+    """随机返回N张照片"""
+    try:
+        limit = int(request.args.get("limit", 9))
+        limit = max(1, min(limit, 50))
+        conn = get_db()
+        c = conn.cursor()
+        rows = c.execute(
+            """
+            SELECT * FROM photos WHERE is_screenshot=0 ORDER BY RANDOM() LIMIT ?
+            """, (limit,)).fetchall()
+        conn.close()
+        results = []
+        for r in rows:
+            results.append({key: r[key] for key in r.keys()})
+            results[-1]["thumb_url"] = f"/api/thumb/{r['id']}"
+            results[-1]["original_url"] = f"/api/photo/{r['id']}"
+        return jsonify({"results": results, "total": len(results)})
+    except Exception as e:
+        print(f"[api_photos_random] error: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+    return jsonify({
+        "total_photos": total,
         "screenshots": screenshots,
         "duplicates": duplicates,
         "named_persons": persons,
