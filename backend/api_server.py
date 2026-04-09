@@ -395,6 +395,13 @@ def _ensure_tables():
             sort_order INTEGER DEFAULT 0,
             PRIMARY KEY (album_id, photo_id)
         );
+        CREATE TABLE IF NOT EXISTS shares (
+            id TEXT PRIMARY KEY,
+            album_id INTEGER,
+            photo_ids TEXT,
+            expires_at TEXT,
+            created_at TEXT
+        );
     """)
     conn.close()
 
@@ -1294,6 +1301,132 @@ def delete_album(album_id):
     conn.commit()
     conn.close()
     return jsonify({"ok": True, "deleted": album_id})
+
+# ── 照片下载/批量下载/分享链接 API ───────────────
+
+from zipfile import ZipFile
+import uuid
+
+@app.route("/api/photo/<int:photo_id>/download")
+@require_auth
+def download_photo(photo_id):
+    conn = get_db()
+    row = conn.execute("SELECT path, filename FROM photos WHERE id=?", (photo_id,)).fetchone()
+    conn.close()
+    if not row:
+        abort(404)
+    path, filename = row["path"], row["filename"]
+    if not os.path.exists(path):
+        abort(404)
+    return send_file(path, as_attachment=True, download_name=filename or f"photo_{photo_id}")
+
+@app.route("/api/photos/download", methods=["POST"])
+@require_auth
+def batch_download_photos():
+    data = request.get_json() or {}
+    ids = data.get("photo_ids")
+    if not ids or not isinstance(ids, list):
+        return jsonify({"error": "photo_ids required"}), 400
+    if len(ids) > 50:
+        return jsonify({"error": "最多支持50张批量下载"}), 400
+    conn = get_db()
+    q = f"SELECT id, path, filename FROM photos WHERE id IN ({','.join(['?']*len(ids))})"
+    rows = conn.execute(q, ids).fetchall()
+    conn.close()
+    mem_zip = io.BytesIO()
+    with ZipFile(mem_zip, 'w') as zf:
+        for r in rows:
+            fp = r["path"]
+            fname = r["filename"] or f"photo_{r['id']}"
+            if os.path.exists(fp):
+                # zip内路径去掉文件夹名
+                arcname = fname
+                try:
+                    zf.write(fp, arcname)
+                except Exception:
+                    continue
+    mem_zip.seek(0)
+    return send_file(mem_zip, mimetype="application/zip", as_attachment=True, download_name="photos.zip")
+
+@app.route("/api/shares", methods=["POST"])
+@require_auth
+def create_share():
+    data = request.get_json() or {}
+    album_id = data.get("album_id")
+    photo_ids = data.get("photo_ids")
+    expires_hours = int(data.get("expires_hours", 72))
+    expires_at = (datetime.now() + timedelta(hours=expires_hours)).isoformat()
+    share_id = uuid.uuid4().hex[:12]
+    created_at = datetime.now().isoformat()
+    conn = get_db()
+    if album_id:
+        row = conn.execute("SELECT id FROM albums WHERE id=?", (album_id,)).fetchone()
+        if not row:
+            conn.close()
+            return jsonify({"error": "album_id not found"}), 404
+        conn.execute(
+            "INSERT INTO shares (id, album_id, expires_at, created_at) VALUES (?,?,?,?)",
+            (share_id, album_id, expires_at, created_at)
+        )
+    elif photo_ids:
+        if not isinstance(photo_ids, list):
+            return jsonify({"error": "photo_ids must be list"}), 400
+        if len(photo_ids) > 200:
+            return jsonify({"error": "最多200张照片"}), 400
+        conn.execute(
+            "INSERT INTO shares (id, photo_ids, expires_at, created_at) VALUES (?,?,?,?)",
+            (share_id, json.dumps(photo_ids, ensure_ascii=False), expires_at, created_at)
+        )
+    else:
+        return jsonify({"error": "album_id 或 photo_ids 必须提供"}), 400
+    conn.commit()
+    conn.close()
+    return jsonify({"share_id": share_id,
+                    "url": f"/share/{share_id}",
+                    "expires_at": expires_at})
+
+@app.route("/api/shares/<share_id>")
+def get_share(share_id):
+    conn = get_db()
+    row = conn.execute(
+        "SELECT * FROM shares WHERE id=?", (share_id,)).fetchone()
+    if not row:
+        conn.close()
+        abort(404)
+    expires_at = row["expires_at"]
+    if expires_at and datetime.now() > datetime.fromisoformat(expires_at):
+        conn.close()
+        return ("已经过期", 410)
+    if row["album_id"]:
+        # 按相册照片取
+        a_id = row["album_id"]
+        photos = conn.execute(
+            """SELECT p.id, p.path, p.filename, p.taken_at, p.gps_city, p.width, p.height, p.size
+                FROM album_photos ap JOIN photos p ON ap.photo_id = p.id WHERE ap.album_id=?
+                ORDER BY ap.sort_order, p.taken_at DESC""", (a_id,)).fetchall()
+    else:
+        # 按照片id列表取
+        ids = json.loads(row["photo_ids"]) if row["photo_ids"] else []
+        if not ids:
+            conn.close()
+            return jsonify({"results": [], "total": 0})
+        q = f"SELECT id, path, filename, taken_at, gps_city, width, height, size FROM photos WHERE id IN ({','.join(['?']*len(ids))})"
+        photos = conn.execute(q, ids).fetchall()
+    results = []
+    for r in photos:
+        results.append({
+            "id": r["id"],
+            "filename": r["filename"],
+            "taken_at": r["taken_at"],
+            "gps_city": r["gps_city"],
+            "width": r["width"],
+            "height": r["height"],
+            "size": r["size"],
+            "thumb_url": f"/api/thumb/{r['id']}",
+            "original_url": f"/api/photo/{r['id']}"
+        })
+    conn.close()
+    return jsonify({"results": results, "total": len(results)})
 
 if __name__ == "__main__":
     import sys
