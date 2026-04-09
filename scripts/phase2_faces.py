@@ -10,6 +10,14 @@ PhotoMemory - Phase 2: 人脸检测 + Embedding + 聚类 + 人物标签
 
 import os
 import sys
+# 支持 HEIC 文件
+try:
+    import pillow_heif
+    pillow_heif.register_heif_opener()
+except ImportError:
+    print("缺少 pillow-heif, 无法处理 HEIC, 运行: pip3 install pillow-heif")
+    # 不退出, 仅打印警告
+
 import json
 import argparse
 import sqlite3
@@ -76,7 +84,7 @@ def init_face_tables(conn: sqlite3.Connection):
 
 def load_face_app():
     print("⏳ 加载人脸识别模型（首次需下载，约300MB）...")
-    app = FaceAnalysis(providers=['CPUExecutionProvider'])
+    app = FaceAnalysis(name='buffalo_l', providers=['CPUExecutionProvider'])
     app.prepare(ctx_id=0, det_size=(640, 640))
     print("✅ 模型加载完成")
     return app
@@ -128,6 +136,13 @@ def detect_faces(db_path: str, limit=None):
         for face in faces:
             if face.det_score < 0.85:
                 continue
+            # 人脸区域最小尺寸限制
+            bbox = face.bbox.tolist()
+            face_w = bbox[2] - bbox[0]
+            face_h = bbox[3] - bbox[1]
+            if face_w < 50 or face_h < 50:
+                continue
+
             bbox = face.bbox.tolist()
 
             # 人脸区域亮度过滤：跳过极暗裁剪区域（演出/夜景误检）
@@ -169,7 +184,7 @@ def detect_faces(db_path: str, limit=None):
 
 # ── 人脸聚类 ──────────────────────────────────────────────
 
-def cluster_faces(db_path: str, eps=0.6, min_samples=2):
+def cluster_faces(db_path: str, eps=0.5, min_samples=2):
     """
     增量聚类：只处理 person_id IS NULL 的人脸。
     优先尝试合并到已有 person（通过 centroid 相似度），否则新建 person。
