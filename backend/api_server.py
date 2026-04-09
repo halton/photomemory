@@ -346,6 +346,44 @@ IMAGE_EXTS = {'.jpg', '.jpeg', '.png', '.heic', '.heif', '.bmp', '.tiff', '.gif'
 
 # ── DB Helper ─────────────────────────────────────────────
 
+def _ensure_tables():
+    """在启动时确保必要的表存在（Phase 2 可能还没跑）"""
+    conn = sqlite3.connect(DB_PATH)
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS faces (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            photo_id    INTEGER,
+            photo_path  TEXT,
+            bbox        TEXT,
+            landmark    TEXT,
+            det_score   REAL,
+            embedding   BLOB,
+            person_id   INTEGER,
+            detected_at TEXT
+        );
+        CREATE TABLE IF NOT EXISTS persons (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            name        TEXT,
+            alias       TEXT,
+            embedding_centroid BLOB,
+            face_count  INTEGER DEFAULT 0,
+            created_at  TEXT,
+            updated_at  TEXT
+        );
+        CREATE TABLE IF NOT EXISTS directories (
+            path TEXT PRIMARY KEY,
+            label TEXT,
+            file_count INTEGER DEFAULT 0,
+            last_scan TEXT
+        );
+        CREATE TABLE IF NOT EXISTS duplicate_groups (
+            hash TEXT PRIMARY KEY,
+            paths TEXT,
+            count INTEGER DEFAULT 0
+        );
+    """)
+    conn.close()
+
 def get_db():
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
@@ -371,21 +409,6 @@ def search():
       limit     - 最多返回数量（默认50）
       offset    - 分页偏移
       has_person - true/false（只返回有人脸/无人脸）
-    """
-    try:
-    """
-    通用搜索接口
-    参数:
-      q        - 文本（人物名/地点）
-      date_from - 开始日期 YYYY-MM-DD
-      date_to   - 结束日期 YYYY-MM-DD
-      year      - 年份
-      month     - 月份
-      person    - 人物名
-      exclude_screenshots - 1/0（默认1）
-      exclude_duplicates  - 1/0（默认0）
-      limit     - 最多返回数量（默认50）
-      offset    - 分页偏移
     """
     conn = get_db()
     c = conn.cursor()
@@ -885,12 +908,22 @@ def photos_random():
 def stats():
     conn = get_db()
     c = conn.cursor()
-    total = c.execute("SELECT COUNT(*) FROM photos").fetchone()[0]
-    screenshots = c.execute("SELECT COUNT(*) FROM photos WHERE is_screenshot=1").fetchone()[0]
-    duplicates = c.execute("SELECT COUNT(*) FROM photos WHERE is_duplicate=1").fetchone()[0]
-    persons = c.execute("SELECT COUNT(*) FROM persons WHERE name IS NOT NULL").fetchone()[0]
-    faces = c.execute("SELECT COUNT(*) FROM faces").fetchone()[0]
-    dirs = c.execute("SELECT path, label, file_count, last_scan FROM directories").fetchall()
+
+    def safe_count(sql):
+        try:
+            return c.execute(sql).fetchone()[0]
+        except Exception:
+            return 0
+
+    total = safe_count("SELECT COUNT(*) FROM photos")
+    screenshots = safe_count("SELECT COUNT(*) FROM photos WHERE is_screenshot=1")
+    duplicates = safe_count("SELECT COUNT(*) FROM photos WHERE is_duplicate=1")
+    persons = safe_count("SELECT COUNT(*) FROM persons WHERE name IS NOT NULL")
+    faces = safe_count("SELECT COUNT(*) FROM faces")
+    try:
+        dirs = c.execute("SELECT path, label, file_count, last_scan FROM directories").fetchall()
+    except Exception:
+        dirs = []
     conn.close()
 
     return jsonify({
@@ -1068,6 +1101,8 @@ if __name__ == "__main__":
     globals()['ADMIN_TOKEN'] = _admin
     globals()['PAIRING_ENABLED'] = _pairing
     globals()['DB_PATH'] = DB_PATH
+
+    _ensure_tables()
 
     # 设备持久化文件（与 DB 同目录）
     _DEVICES_FILE = Path(DB_PATH).parent / "photomemory_devices.json"

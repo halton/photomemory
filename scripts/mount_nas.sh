@@ -4,7 +4,7 @@
 
 NAS_HOST="nengcloud"
 NAS_PATH="/volume1/photo"
-MOUNT_POINT="/Volumes/nengcloud-photo"
+MOUNT_POINT="/Volumes/photo"
 
 echo "🔗 挂载 NAS: $NAS_HOST$NAS_PATH → $MOUNT_POINT"
 
