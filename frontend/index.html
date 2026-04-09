@@ -473,6 +473,37 @@
 </div>
 
 <script>
+// —— 快速筛选标签 ——
+function quickFilter(type) {
+  // 取消所有active
+  document.querySelectorAll('.qf').forEach(el => el.classList.remove('active'));
+  let now = new Date();
+  let date_from = '', date_to = '';
+  if(type==='week') {
+    date_to = now.toISOString().slice(0,10);
+    let weekAgo = new Date(now.getTime() - 7*864e5);
+    date_from = weekAgo.toISOString().slice(0,10);
+  } else if(type==='month') {
+    date_to = now.toISOString().slice(0,10);
+    let mAgo = new Date(now.setMonth(now.getMonth()-1));
+    date_from = mAgo.toISOString().slice(0,10);
+  } else if(type==='year') {
+    date_to = now.toISOString().slice(0,10);
+    date_from = now.getFullYear()+'-01-01';
+  }
+  if(type!=='person') {
+    // 设置参数
+    window._PM_SEARCH_EXTRA = {date_from, date_to};
+    document.querySelector('.qf.'+type)?.classList.add('active');
+    currentPersonId = null;
+    doSearch();
+  } else {
+    window._PM_SEARCH_EXTRA={person_has:1};
+    document.querySelector('.qf.person')?.classList.add('active');
+    doSearch();
+  }
+}
+
 // —— 视图切换&时间轴逻辑 ——
 let currentViewMode = 'grid';
 document.getElementById('gridViewBtn').onclick = () => setGridTimeline('grid');
@@ -723,10 +754,25 @@ async function submitLogin() {
 
 // ── Init ──────────────────────────────────────────────────
 
+let _pm_init_random_loaded = false;
 async function init() {
   await loadStats();
   await loadPersonsSidebar();
   await loadYears();
+  // 首页加载随机照片
+  const qv = document.getElementById('searchInput').value.trim();
+  if (!_pm_init_random_loaded && !qv && currentFilter==='all') {
+    const grid = document.getElementById('photoGrid');
+    grid.innerHTML = '<div class="loading" style="grid-column:1/-1">加载中...</div>';
+    const r = await apiFetch('/photos/random?limit=9').then(r=>r.json());
+    if (r && r.results && r.results.length>0) {
+      renderGrid(r.results, false);
+      document.getElementById('statsBar').innerHTML = `<b>随机照片</b>`;
+      document.getElementById('loadMore').style.display = 'none';
+      _pm_init_random_loaded = true;
+      return;
+    }
+  }
   doSearch();
 }
 
@@ -849,6 +895,10 @@ async function doSearch(append = false) {
   if (month && year) params.set('month', month);
   if (currentFilter === 'duplicates') params.set('exclude_duplicates', '0');
   if (currentPersonId) params.set('person', currentPersonId);
+  // 快速筛选扩展参数（date/person）
+  if(window._PM_SEARCH_EXTRA) {
+    Object.entries(window._PM_SEARCH_EXTRA).forEach(([k,v]) => {if(v) params.set(k,v);});
+  }
 
   showView('photos');
   if (!append) document.getElementById('photoGrid').innerHTML =
