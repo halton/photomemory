@@ -775,6 +775,95 @@ def photo_persons(photo_id):
 
 # ── 统计 API ──────────────────────────────────────────────
 
+@app.route("/api/stats/timeline", methods=["GET"])
+@require_auth
+def stats_timeline():
+    """返回按月统计的照片数量"""
+    try:
+        conn = get_db()
+        c = conn.cursor()
+        rows = c.execute("""
+            SELECT strftime('%Y-%m', taken_at) as month, COUNT(*) as count
+            FROM photos
+            GROUP BY month
+            ORDER BY month ASC
+        """).fetchall()
+        conn.close()
+        result = [{"month": r["month"], "count": r["count"]} for r in rows if r["month"]]
+        return jsonify(result)
+    except Exception as e:
+        print(f"[stats_timeline] error: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/stats/persons", methods=["GET"])
+@require_auth
+def stats_persons():
+    """返回人物照片数量排行"""
+    try:
+        conn = get_db()
+        c = conn.cursor()
+        rows = c.execute("""
+            SELECT p.id, p.name, COUNT(f.id) as count
+            FROM persons p
+            JOIN faces f ON f.person_id = p.id
+            WHERE p.name IS NOT NULL
+            GROUP BY p.id
+            ORDER BY count DESC
+            LIMIT 50
+        """).fetchall()
+        conn.close()
+        result = [
+            {"id": r["id"], "name": r["name"], "count": r["count"]}
+            for r in rows if r["name"] is not None
+        ]
+        return jsonify(result)
+    except Exception as e:
+        print(f"[stats_persons] error: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/photos/random", methods=["GET"])
+@require_auth
+def photos_random():
+    """随机返回N张照片"""
+    try:
+        limit = int(request.args.get("limit", 9))
+        limit = max(1, min(limit, 50))
+        conn = get_db()
+        c = conn.cursor()
+        rows = c.execute("""
+            SELECT p.id, p.path, p.filename, p.taken_at,
+                   p.gps_lat, p.gps_lon, p.gps_city,
+                   p.width, p.height, p.is_screenshot, p.is_duplicate,
+                   p.dir_label, p.size
+            FROM photos p
+            ORDER BY RANDOM()
+            LIMIT ?
+        """, (limit,)).fetchall()
+        conn.close()
+        results = []
+        for r in rows:
+            results.append({
+                "id": r["id"],
+                "path": r["path"],
+                "filename": r["filename"],
+                "taken_at": r["taken_at"],
+                "gps_lat": r["gps_lat"],
+                "gps_lon": r["gps_lon"],
+                "gps_city": r["gps_city"],
+                "width": r["width"],
+                "height": r["height"],
+                "is_screenshot": bool(r["is_screenshot"]),
+                "is_duplicate": bool(r["is_duplicate"]),
+                "dir_label": r["dir_label"],
+                "thumb_url": f"/api/thumb/{r['id']}",
+                "original_url": f"/api/photo/{r['id']}"
+            })
+        return jsonify({"results": results, "total": len(results)})
+    except Exception as e:
+        print(f"[photos_random] error: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route("/api/stats")
 @require_auth
 def stats():
