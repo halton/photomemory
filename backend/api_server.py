@@ -381,6 +381,20 @@ def _ensure_tables():
             paths TEXT,
             count INTEGER DEFAULT 0
         );
+        CREATE TABLE IF NOT EXISTS albums (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            description TEXT,
+            cover_photo_id INTEGER,
+            created_at TEXT,
+            updated_at TEXT
+        );
+        CREATE TABLE IF NOT EXISTS album_photos (
+            album_id INTEGER NOT NULL,
+            photo_id INTEGER NOT NULL,
+            sort_order INTEGER DEFAULT 0,
+            PRIMARY KEY (album_id, photo_id)
+        );
     """)
     conn.close()
 
@@ -1161,6 +1175,125 @@ def health():
 
 
 # ── 主入口 ────────────────────────────────────────────────
+
+# 相册API
+@app.route("/api/albums", methods=["GET"])
+@require_auth
+def list_albums():
+    conn = get_db()
+    q = '''SELECT a.id, a.name, a.description, a.created_at, a.updated_at,
+                  COUNT(ap.photo_id) as photo_count,
+                  a.cover_photo_id,
+                  (SELECT path FROM photos WHERE id=a.cover_photo_id) as cover_path
+           FROM albums a
+           LEFT JOIN album_photos ap ON ap.album_id = a.id
+           GROUP BY a.id
+           ORDER BY a.updated_at DESC, a.created_at DESC'''
+    rows = conn.execute(q).fetchall()
+    albums = []
+    for r in rows:
+        thumb_url = f"/api/thumb/{r['cover_photo_id']}" if r['cover_photo_id'] else None
+        albums.append({
+            "id": r["id"],
+            "name": r["name"],
+            "description": r["description"],
+            "photo_count": r["photo_count"],
+            "cover_photo_id": r["cover_photo_id"],
+            "cover_thumb": thumb_url,
+            "created_at": r["created_at"],
+            "updated_at": r["updated_at"],
+        })
+    conn.close()
+    return jsonify({"albums": albums})
+
+@app.route("/api/albums", methods=["POST"])
+@require_auth
+def create_album():
+    data = request.get_json() or {}
+    name = data.get("name", "").strip()
+    desc = data.get("description", "").strip()
+    cover_photo_id = data.get("cover_photo_id")
+    if not name:
+        return jsonify({"error": "name required"}), 400
+    now = datetime.now().isoformat()
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute("""
+        INSERT INTO albums (name, description, cover_photo_id, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?)""", (name, desc, cover_photo_id, now, now))
+    album_id = cur.lastrowid
+    conn.commit()
+    conn.close()
+    return jsonify({"id": album_id, "ok": True})
+
+@app.route("/api/albums/<int:album_id>/photos", methods=["GET"])
+@require_auth
+def album_photos(album_id):
+    conn = get_db()
+    q = '''SELECT p.id, p.path, p.filename, p.taken_at, p.gps_city, p.width, p.height, p.size
+           FROM album_photos ap
+           JOIN photos p ON ap.photo_id = p.id
+           WHERE ap.album_id = ?
+           ORDER BY ap.sort_order, p.taken_at DESC'''
+    rows = conn.execute(q, (album_id,)).fetchall()
+    photos = []
+    for r in rows:
+        photos.append({
+            "id": r["id"],
+            "filename": r["filename"],
+            "taken_at": r["taken_at"],
+            "gps_city": r["gps_city"],
+            "width": r["width"],
+            "height": r["height"],
+            "size": r["size"],
+            "thumb_url": f"/api/thumb/{r['id']}",
+            "original_url": f"/api/photo/{r['id']}"
+        })
+    conn.close()
+    return jsonify({"photos": photos, "total": len(photos)})
+
+@app.route("/api/albums/<int:album_id>/photos", methods=["POST"])
+@require_auth
+def add_photos_to_album(album_id):
+    data = request.get_json() or {}
+    ids = data.get("photo_ids") or []
+    if not ids or not isinstance(ids, list):
+        return jsonify({"error": "photo_ids required"}), 400
+    conn = get_db()
+    cur = conn.cursor()
+    existing = set(row[0] for row in cur.execute(
+        "SELECT photo_id FROM album_photos WHERE album_id=?", (album_id,)))
+    for idx, pid in enumerate(ids):
+        if pid not in existing:
+            cur.execute(
+                "INSERT OR IGNORE INTO album_photos (album_id, photo_id, sort_order) VALUES (?, ?, ?)",
+                (album_id, pid, idx))
+    conn.commit()
+    conn.close()
+    return jsonify({"ok": True})
+
+@app.route("/api/albums/<int:album_id>/photos/<int:photo_id>", methods=["DELETE"])
+@require_auth
+def remove_photo_from_album(album_id, photo_id):
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute(
+        "DELETE FROM album_photos WHERE album_id=? AND photo_id=?",
+        (album_id, photo_id))
+    conn.commit()
+    conn.close()
+    return jsonify({"ok": True, "removed": photo_id})
+
+@app.route("/api/albums/<int:album_id>", methods=["DELETE"])
+@require_auth
+def delete_album(album_id):
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute("DELETE FROM album_photos WHERE album_id=?", (album_id,))
+    cur.execute("DELETE FROM albums WHERE id=?", (album_id,))
+    conn.commit()
+    conn.close()
+    return jsonify({"ok": True, "deleted": album_id})
 
 if __name__ == "__main__":
     import sys
