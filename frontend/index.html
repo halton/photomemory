@@ -19,6 +19,11 @@
 
   /* Search bar */
   .search-wrap { flex: 1; display: flex; gap: 8px; max-width: 600px; }
+  @media (max-width: 768px) {
+    .search-wrap { max-width: none; width: 100%; }
+    .search-wrap input { font-size: 15px; }
+    header { flex-wrap: wrap; }
+  }
   .search-wrap input { flex: 1; background: #2a2a2a; border: 1px solid #3a3a3a;
     border-radius: 8px; padding: 8px 14px; color: #e0e0e0; font-size: 14px;
     outline: none; }
@@ -36,7 +41,32 @@
   /* Sidebar */
   aside { width: 220px; min-width: 220px; background: #141414;
           border-right: 1px solid #2a2a2a; overflow-y: auto;
-          padding: 16px 0; }
+          padding: 16px 0;
+          transition: transform 0.3s, opacity 0.3s; }
+  @media (max-width: 768px) {
+    aside#sidebar {
+      display: none !important;
+      position: absolute;
+      z-index: 999;
+      opacity: 0;
+      pointer-events: none;
+    }
+    .timeline-sidebar-scroll {
+      display: flex !important;
+      overflow-x: auto;
+      background: #1a1a1a;
+      border-bottom: 1px solid #222;
+      gap: 10px;
+      padding: 6px 8px 6px 8px;
+      position: sticky;
+      top: 57px;
+      left: 0;
+      right: 0;
+      z-index: 98;
+      transition: opacity 0.3s;
+      white-space: nowrap;
+    }
+  }
   .sidebar-section { margin-bottom: 8px; }
   .sidebar-title { padding: 6px 16px; font-size: 11px; font-weight: 600;
                    color: #666; text-transform: uppercase; letter-spacing: 0.5px; }
@@ -76,16 +106,27 @@
   .stats-bar { padding: 8px 16px; background: #141414;
                border-bottom: 1px solid #2a2a2a;
                font-size: 12px; color: #666; display: flex; gap: 16px; }
+  @media (max-width: 768px) {
+    .stat-card { flex: 1 0 42vw !important; max-width: 46vw; }
+    .stats-bar { flex-wrap: wrap; }
+  }
   .stats-bar span { color: #888; }
   .stats-bar b { color: #aaa; }
 
   /* Photo grid */
   .photo-grid { padding: 16px; display: grid;
-                grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+                grid-template-columns: repeat(4, 1fr);
                 gap: 8px; }
+  @media (max-width: 768px) {
+    .photo-grid { grid-template-columns: repeat(2, 1fr); }
+  }
   .photo-card { position: relative; border-radius: 8px; overflow: hidden;
                 background: #1a1a1a; cursor: pointer; aspect-ratio: 1;
-                transition: transform 0.15s; }
+                transition: transform 0.15s, opacity 0.3s; }
+  .photo-card.hide {
+    opacity: 0;
+    pointer-events: none;
+  }
   .photo-card:hover { transform: scale(1.02); }
   .photo-card img { width: 100%; height: 100%; object-fit: cover; display: block; }
   .photo-card .overlay { position: absolute; bottom: 0; left: 0; right: 0;
@@ -131,7 +172,22 @@
   .lightbox-panel { width: 300px; min-width: 300px; height: 100vh;
                     background: #141414; border-left: 1px solid #2a2a2a;
                     overflow-y: auto; padding: 20px 16px; display: flex;
-                    flex-direction: column; gap: 0; }
+                    flex-direction: column; gap: 0; transition: transform 0.3s, opacity 0.3s; }
+  @media (max-width: 768px) {
+    .lightbox-panel {
+      position: fixed;
+      width: 100vw;
+      min-width: unset;
+      max-height: 45vh;
+      height: 45vh;
+      left: 0; right: 0; bottom: 0; top: unset;
+      border-left: none;
+      border-top: 1px solid #2a2a2a;
+      z-index: 1100;
+      transform: translateY(0);
+      box-shadow: 0 -2px 18px #000b;
+    }
+  }
   .lb-thumb { width: 100%; border-radius: 8px; margin-bottom: 16px;
               max-height: 200px; object-fit: cover; }
   .lb-section { margin-bottom: 16px; }
@@ -216,6 +272,44 @@
 
   /* Empty state */
   .empty { text-align: center; padding: 60px 20px; color: #444; }
+.empty .icon { font-size: 48px; margin-bottom: 12px; }
+.empty p { font-size: 16px;color:#888;margin-top:8px; }
+
+.skeleton-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+@media (max-width: 768px) {
+  .skeleton-grid { grid-template-columns: repeat(2,1fr); }
+}
+.skeleton-box {
+  aspect-ratio: 1;
+  background: linear-gradient(90deg, #252525 25%, #313131 50%, #252525 75%);
+  background-size: 200% 100%;
+  border-radius: 10px;
+  animation: skeleton-loading 1s infinite linear;
+}
+@keyframes skeleton-loading {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+#scrollToTopBtn {
+  display: none;
+  position: fixed;
+  right: 24px;
+  bottom: 40px;
+  background: #6366f1;
+  color: #fff;
+  border: none;
+  border-radius: 100px;
+  width: 48px;
+  height: 48px;
+  box-shadow: 0 3px 18px #111c;
+  font-size: 25px;
+  cursor: pointer;
+  z-index: 999;
+  opacity:0.8;
+  transition:opacity 0.3s;
+}
+#scrollToTopBtn.show { display: block; opacity: 1; }
   .empty .icon { font-size: 48px; margin-bottom: 12px; }
   .empty p { font-size: 14px; }
 
@@ -300,6 +394,9 @@
       background: #18181b;
       z-index: 50;
     }
+    @media (max-width: 768px) {
+      #mapContainer { height: calc(100dvh - 57px) !important; width: 100vw !important; left: 0; }
+    }
     .leaflet-popup-content {
       text-align: center;
     }
@@ -324,6 +421,8 @@
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
 </head>
 <body>
+<!-- 移动端年份横向滚动栏，桌面隐藏。用JS动态插入 -->
+<div id="timelineSidebarScroll" class="timeline-sidebar-scroll" style="display:none"></div>
 
 <header>
   <h1>Photo<span>Memory</span></h1>
@@ -634,6 +733,27 @@ function setGridTimeline(mode) {
   if(mode==='timeline') renderTimeline(currentResults);
 }
 function renderTimeline(photos) {
+  // 移动端：顶部横向年份栏
+  const years = [...new Set(photos.map(p=>(p.taken_at||'').slice(0,4)))].filter(y=>y).sort().reverse();
+  const yearScroll = document.getElementById('timelineSidebarScroll');
+  if(window.innerWidth<=768 && years.length) {
+    yearScroll.style.display = 'flex';
+    yearScroll.innerHTML = '';
+    years.forEach(y=>{
+      const btn = document.createElement('button');
+      btn.className = 'btn secondary';
+      btn.style.padding = '5px 14px';
+      btn.textContent = y;
+      btn.onclick=()=>{
+        const el = document.querySelector(`.timeline-year-anchor[data-year='${y}']`);
+        if(el) el.scrollIntoView({behavior:'smooth',block:'start'});
+      }
+      yearScroll.appendChild(btn);
+    });
+  } else {
+    yearScroll.style.display = 'none';
+  }
+
   // 按月分组，photos应有taken_at: YYYY-MM-DD/HH:MM:SS
   const groups = {};
   photos.forEach(p => {
@@ -645,17 +765,41 @@ function renderTimeline(photos) {
   wrap.innerHTML = '';
   const months = Object.keys(groups).sort().reverse();
   if (!months.length) {
-    wrap.innerHTML = '<div class="empty">暂无照片</div>';
+    wrap.innerHTML = '<div class="empty"><div class="icon">🔍</div><p>没有找到照片</p></div>';
     return;
   }
+  let lastYear = null;
   months.forEach(m => {
+    const yy = m.slice(0,4), mm = m.slice(5,7);
+    if (lastYear !== yy) {
+      // 年份分割线 + anchor
+      if (lastYear!==null) {
+        const divider = document.createElement('div');
+        divider.style.height = '2px';
+        divider.style.background = '#191e31';
+        divider.style.margin = '20px 0 12px 0';
+        wrap.appendChild(divider);
+      }
+      const anchor = document.createElement('div');
+      anchor.className = 'timeline-year-anchor';
+      anchor.dataset.year = yy;
+      anchor.style.height = '0';
+      wrap.appendChild(anchor);
+      lastYear = yy;
+    }
     const g = document.createElement('div');
     g.className = 'timeline-group';
-    const yy = m.slice(0,4), mm = m.slice(5,7);
-    g.innerHTML = `<div class='timeline-title'>${yy}年${mm}月（${groups[m].length}张）</div>`;
+    // 展开折叠逻辑
+    let expanded = false;
+    g.innerHTML = `<div class='timeline-title' style='cursor:pointer;display:flex;align-items:center;'>
+      <span>${yy}年${mm}月</span>
+      <span style='margin-left:6px;font-size:12px;background:#283c6a;padding:2px 9px;border-radius:12px;color:#e94560'>${groups[m].length}</span>
+      <span class='month-more' style='margin-left:9px;font-size:14px;color:#666;display:none;user-select:none'>（收起）</span>
+      <span class='month-expand' style='margin-left:9px;font-size:14px;color:#666;display:none;user-select:none'>（展开全部...）</span>
+    </div>`;
     const row = document.createElement('div');
     row.className = 'timeline-row';
-    groups[m].forEach((p,i) => {
+    groups[m].slice(0,12).forEach((p,i) => {
       const img = document.createElement('img');
       img.className = 'timeline-thumb';
       img.src = authUrl(`/api/thumb/${p.id}`);
@@ -663,7 +807,75 @@ function renderTimeline(photos) {
       img.onclick = ()=>openLightbox(currentResults.indexOf(p));
       row.appendChild(img);
     });
+    // 超过12张 +N 按钮
+    if (groups[m].length>12) {
+      const moreBtn = document.createElement('span');
+      moreBtn.textContent = `+${groups[m].length-12}`;
+      moreBtn.style.marginLeft = '12px';
+      moreBtn.style.fontSize = '14px';
+      moreBtn.style.background = '#38405a';
+      moreBtn.style.color = '#f7b801';
+      moreBtn.style.padding = '2px 9px';
+      moreBtn.style.borderRadius = '14px';
+      moreBtn.style.cursor = 'pointer';
+      moreBtn.onclick = ()=>expand();
+      row.appendChild(moreBtn);
+      g.querySelector('.month-expand').style.display = '';
+    }
     g.appendChild(row);
+    function expand() {
+      if (expanded) {
+        // 折叠
+        row.innerHTML = '';
+        groups[m].slice(0,12).forEach((p,i) => {
+          const img = document.createElement('img');
+          img.className = 'timeline-thumb';
+          img.src = authUrl(`/api/thumb/${p.id}`);
+          img.alt = p.filename||'';
+          img.onclick = ()=>openLightbox(currentResults.indexOf(p));
+          row.appendChild(img);
+        });
+        if (groups[m].length>12) {
+          const moreBtn = document.createElement('span');
+          moreBtn.textContent = `+${groups[m].length-12}`;
+          moreBtn.style.marginLeft = '12px';
+          moreBtn.style.fontSize = '14px';
+          moreBtn.style.background = '#38405a';
+          moreBtn.style.color = '#f7b801';
+          moreBtn.style.padding = '2px 9px';
+          moreBtn.style.borderRadius = '14px';
+          moreBtn.style.cursor = 'pointer';
+          moreBtn.onclick = ()=>expand();
+          row.appendChild(moreBtn);
+          g.querySelector('.month-expand').style.display = '';
+          g.querySelector('.month-more').style.display = 'none';
+        }
+        expanded = false;
+      } else {
+        // 展开
+        row.innerHTML = '';
+        groups[m].forEach((p,i) => {
+          const img = document.createElement('img');
+          img.className = 'timeline-thumb';
+          img.src = authUrl(`/api/thumb/${p.id}`);
+          img.alt = p.filename||'';
+          img.onclick = ()=>openLightbox(currentResults.indexOf(p));
+          row.appendChild(img);
+        });
+        g.querySelector('.month-expand').style.display = 'none';
+        g.querySelector('.month-more').style.display = '';
+        const lessBtn = document.createElement('span');
+        lessBtn.textContent = '收起';
+        lessBtn.style.marginLeft = '12px';
+        lessBtn.style.fontSize = '14px';
+        lessBtn.style.color = '#44e6c3';
+        lessBtn.style.cursor = 'pointer';
+        lessBtn.onclick = ()=>expand();
+        row.appendChild(lessBtn);
+        expanded = true;
+      }
+    }
+    g.querySelector('.timeline-title').onclick = expand;
     wrap.appendChild(g);
   });
 }
@@ -877,7 +1089,8 @@ async function init() {
   const qv = document.getElementById('searchInput').value.trim();
   if (!_pm_init_random_loaded && !qv && currentFilter==='all') {
     const grid = document.getElementById('photoGrid');
-    grid.innerHTML = '<div class="loading" style="grid-column:1/-1">加载中...</div>';
+    grid.innerHTML = '<div class="skeleton-grid" style="grid-column:1/-1;padding:30px 0;display:grid;grid-template-columns:repeat(4,1fr);gap:12px">'+Array(8).fill('').map(_=>'<div class="skeleton-box"></div>').join('')+'</div>';
+    setTimeout(()=>{},350);
     const r = await apiFetch('/photos/random?limit=9').then(r=>r.json());
     if (r && r.results && r.results.length>0) {
       renderGrid(r.results, false);
@@ -1679,6 +1892,23 @@ async function loadPhotoMarkers() {
   map.fitBounds(mapMarkers.getBounds(), {padding: [20,20]});
   _mapDataLoaded = true;
 }
+</script>
+<button id="scrollToTopBtn" title="回到顶部" onclick="scrollToTop()">↑</button>
+<script>
+// 滚动到顶部按钮逻辑
+(function(){
+  const btn = document.getElementById('scrollToTopBtn');
+  window.addEventListener('scroll', function() {
+    if(window.scrollY>500) {
+      btn.classList.add('show');
+    } else {
+      btn.classList.remove('show');
+    }
+  });
+  window.scrollToTop = function() {
+    window.scrollTo({top:0,behavior:'smooth'});
+  };
+})();
 </script>
 </body>
 </html>
