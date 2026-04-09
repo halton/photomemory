@@ -269,6 +269,24 @@
     .timeline-thumb { width: 80px; height: 80px; }
     .timeline-title { font-size: 13px; }
   }
+  /* 日期快选按钮 */
+  .date-quick-btn {
+    background: #23233a;
+    color: #e0e0e0;
+    border: none;
+    border-radius: 999px;
+    padding: 2px 17px;
+    font-size: 12px;
+    margin-right: 0px;
+    margin-bottom: 2px;
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s;
+    outline: none;
+  }
+  .date-quick-btn.selected, .date-quick-btn:active {
+    background: #e94560;
+    color: #fff;
+  }
 </style>
   <!-- Leaflet CSS -->
   <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
@@ -352,6 +370,7 @@
           <span class="filter-chip qf" onclick="quickFilter('person')">有人物</span>
         </div>
         <div class="filters" id="filtersBar">
+  <div id="dateQuickBtns" style="display:flex;gap:8px;margin-bottom:6px;width:100%"></div>
           <span style="font-size:12px;color:#666">年份:</span>
           <select class="filter-select" id="yearSelect" onchange="doSearch()">
             <option value="">全部</option>
@@ -458,8 +477,43 @@
       <a id="lbOpenMaps" href="#" target="_blank" style="display:none">🗺 地图</a>
       <button onclick="deleteCurrentPhoto()" style="background:none;border:none;color:#ef4444;cursor:pointer;font-size:13px;padding:6px 10px;border-radius:6px;border:1px solid rgba(239,68,68,0.3);">🗑️ 删除</button>
     </div>
+    <div class="lb-section" id="lbGpsMiniMapSection" style="margin-top:20px"></div>
   </div>
 </div>
+<script>
+(function(){
+  // 灯箱迷你地图渲染
+  let miniMap = null;
+  let miniLayer = null;
+  window.renderLightboxMiniMap = function(gps_city, lat, lon) {
+    const section = document.getElementById('lbGpsMiniMapSection');
+    section.innerHTML = '';
+    if (typeof lat !== 'number' || typeof lon !== 'number' || isNaN(lat) || isNaN(lon)) {
+      section.style.display = 'none';
+      if (miniMap) { miniMap.remove(); miniMap=null; }
+      return;
+    }
+    section.style.display = '';
+    const cityDiv = document.createElement('div');
+    cityDiv.textContent = gps_city || '';
+    cityDiv.style = 'font-size:24px;font-weight:700;margin-bottom:8px;text-align:center;color:#fff;';
+    section.appendChild(cityDiv);
+    const mapDiv = document.createElement('div');
+    mapDiv.id = 'miniMapMap';
+    mapDiv.style = 'width:200px;height:150px;margin:0 auto;border-radius:12px;box-shadow:0 0 7px #131313;overflow:hidden;';
+    section.appendChild(mapDiv);
+    setTimeout(()=>{
+      if (miniMap) { miniMap.remove(); miniMap=null; }
+      miniMap = L.map('miniMapMap', { zoomControl:false, attributionControl:false });
+      miniLayer = L.tileLayer('https://basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {});
+      miniLayer.addTo(miniMap);
+      L.marker([lat, lon]).addTo(miniMap);
+      miniMap.setView([lat, lon], 13);
+    }, 100);
+  };
+})();
+</script>
+
 
 <!-- Login / Pairing Overlay -->
 <div class="login-overlay show" id="loginOverlay">
@@ -971,17 +1025,38 @@ async function doSearch(append = false) {
 
   if(currentViewMode==='timeline') renderTimeline(currentResults);
   else renderGrid(r.results, append);
-  document.getElementById('statsBar').innerHTML =
-    `共 <b>${r.total.toLocaleString()}</b> 张照片` +
-    (q ? ` · 关键词: <b>${q}</b>` : '') +
-    (year ? ` · ${year}年` : '') +
-    (month ? `${month}月` : '');
+  updatePhotoCountBar(r.total);
 
   const loadMoreEl = document.getElementById('loadMore');
   loadMoreEl.className = currentResults.length < currentTotal ? 'load-more show' : 'load-more';
 }
 
 function loadMore() { doSearch(true); }
+
+// 搜索结果计数区域
+function updatePhotoCountBar(total) {
+  let statsBar = document.getElementById('statsBar');
+  statsBar.innerHTML = `共找到 <b>${total.toLocaleString()}</b> 张照片`;
+}
+
+// ── 图片懒加载（IntersectionObserver）────────────
+function lazyLoadImages() {
+  if (!('IntersectionObserver' in window)) return;
+  let observer = new IntersectionObserver((entries, obs)=>{
+    entries.forEach(entry=>{
+      if(entry.isIntersecting) {
+        let img = entry.target;
+        if(img.dataset.src && !img.src) {
+          img.src = img.dataset.src;
+        }
+        obs.unobserve(img);
+      }
+    });
+  },{rootMargin:'80px'});
+  document.querySelectorAll('img.lazy-img').forEach(img=>{
+    if(!img.src) observer.observe(img);
+  });
+}
 
 // ── Render Grid ───────────────────────────────────────────
 
@@ -1001,7 +1076,7 @@ function renderGrid(photos, append) {
 
     const date = p.taken_at ? p.taken_at.substring(0, 10).replace(/:/g, '-') : '';
     card.innerHTML = `
-      <img src="${authUrl(`/api/thumb/${p.id}`)}" loading="lazy" alt="${p.filename}"
+      <img data-src="${authUrl(`/api/thumb/${p.id}`)}" alt="${p.filename}" class="lazy-img"
            onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22/>'">
       ${p.is_duplicate ? '<span class="badge dup">重复</span>' : ''}
       ${p.is_screenshot ? '<span class="badge shot">截图</span>' : ''}
@@ -1009,7 +1084,10 @@ function renderGrid(photos, append) {
     card.onclick = () => openLightbox(globalIdx);
     grid.appendChild(card);
   });
+  // 懒加载处理
+  lazyLoadImages();
 }
+
 
 // ── Lightbox ──────────────────────────────────────────────
 
@@ -1075,6 +1153,13 @@ async function updateLightbox() {
 
   // 原图链接
   document.getElementById('lbDownload').href = `${API}/photo/${p.id}`;
+
+  // 迷你地图
+  if (p.gps_lat && p.gps_lon) {
+    renderLightboxMiniMap(p.gps_city, p.gps_lat, p.gps_lon);
+  } else {
+    renderLightboxMiniMap(null, NaN, NaN);
+  }
 
   // 人物（异步加载）
   loadLightboxPersons(p.id);
@@ -1179,6 +1264,61 @@ async function loadStatsDashboard() {
     type:'doughnut',data:{labels:top10.map(e=>e.city),datasets:[{data:top10.map(e=>e.count),backgroundColor:["#e94560","#f7b801","#00b894","#0984e3","#6c5ce7","#00cec9","#fdcb6e","#e17055","#6366f1","#74b9ff"]}]},options:{plugins:{legend:{labels:{color:'#aaa'}}},responsive:true}
   });
 }
+
+// --- 日期快选按钮 ---
+(function(){
+  const quickBtns = [
+    {text:'最近一周',key:'week'},
+    {text:'最近一月',key:'month'},
+    {text:'最近三月',key:'quarter'},
+    {text:'今年',key:'year'},
+    {text:'全部',key:'all'},
+  ];
+  function calcRange(type) {
+    let now = new Date();
+    let from = '', to = '';
+    if(type==='week') {
+      to = now.toISOString().slice(0,10);
+      from = new Date(now.getTime()-7*864e5).toISOString().slice(0,10);
+    } else if(type==='month') {
+      to = now.toISOString().slice(0,10);
+      from = new Date(now.setMonth(now.getMonth()-1)).toISOString().slice(0,10);
+    } else if(type==='quarter') {
+      to = now.toISOString().slice(0,10);
+      from = new Date(now.setMonth(now.getMonth()-3)).toISOString().slice(0,10);
+    } else if(type==='year') {
+      to = now.toISOString().slice(0,10);
+      from = now.getFullYear()+'-01-01';
+    } else {
+      from=to='';
+    }
+    return {from,to};
+  }
+  window.renderDateQuickBtns = function() {
+    const bar = document.getElementById('dateQuickBtns');
+    if (!bar) return;
+    bar.innerHTML = '';
+    quickBtns.forEach(btn => {
+      const b = document.createElement('button');
+      b.className = 'date-quick-btn';
+      b.textContent = btn.text;
+      b.onclick = () => {
+        bar.querySelectorAll('.date-quick-btn').forEach(e=>e.classList.remove('selected'));
+        b.classList.add('selected');
+        let v = btn.key;
+        if(v==='all') {
+          window._PM_SEARCH_EXTRA = {};
+        } else {
+          let r = calcRange(v);
+          window._PM_SEARCH_EXTRA = {date_from:r.from,date_to:r.to};
+        }
+        doSearch();
+      };
+      bar.appendChild(b);
+    });
+  }
+  document.addEventListener('DOMContentLoaded',renderDateQuickBtns);
+})();
 
 // 热门城市标签（filtersBar下）
 async function loadHotCitiesBar() {
