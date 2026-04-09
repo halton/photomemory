@@ -370,6 +370,22 @@ def search():
       exclude_duplicates  - 1/0（默认0）
       limit     - 最多返回数量（默认50）
       offset    - 分页偏移
+      has_person - true/false（只返回有人脸/无人脸）
+    """
+    try:
+    """
+    通用搜索接口
+    参数:
+      q        - 文本（人物名/地点）
+      date_from - 开始日期 YYYY-MM-DD
+      date_to   - 结束日期 YYYY-MM-DD
+      year      - 年份
+      month     - 月份
+      person    - 人物名
+      exclude_screenshots - 1/0（默认1）
+      exclude_duplicates  - 1/0（默认0）
+      limit     - 最多返回数量（默认50）
+      offset    - 分页偏移
     """
     conn = get_db()
     c = conn.cursor()

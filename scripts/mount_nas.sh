@@ -3,22 +3,25 @@
 # 用法: ./mount_nas.sh
 
 NAS_HOST="nengcloud"
-NAS_PATH="/volume1/backup_photos"
-MOUNT_POINT="/Volumes/nas-photos"
+NAS_PATH="/volume1/photo"
+MOUNT_POINT="/Volumes/nengcloud-photo"
 
 echo "🔗 挂载 NAS: $NAS_HOST$NAS_PATH → $MOUNT_POINT"
 
 # 确保挂载点存在
-sudo mkdir -p "$MOUNT_POINT"
+mkdir -p "$MOUNT_POINT"
 
-# 尝试 NFS 挂载（快）
-echo "尝试 NFS 挂载..."
-sudo mount -t nfs -o resvport,soft,timeo=10 "$NAS_HOST:$NAS_PATH" "$MOUNT_POINT" 2>/dev/null
+# 优先 SMB 挂载（Synology photo 共享）
+echo "尝试 SMB 挂载..."
+mount_smbfs "//guest@$NAS_HOST/photo" "$MOUNT_POINT" 2>/dev/null
 
 if [ $? -eq 0 ]; then
-    echo "✅ NFS 挂载成功: $MOUNT_POINT"
+    echo "✅ SMB 挂载成功 (guest): $MOUNT_POINT"
     ls "$MOUNT_POINT" | head -5
 else
-    echo "⚠️  NFS 失败，请在 Finder 中手动挂载:"
-    echo "   Cmd+K → smb://$NAS_HOST/backup_photos"
+    # 如果 guest 不行，提示输入账号
+    echo "guest 失败，尝试带账号挂载..."
+    echo "⚠️  请手动在 Finder 中挂载:"
+    echo "   Cmd+K → smb://$NAS_HOST/photo"
+    echo "   或运行: mount_smbfs '//用户名:密码@$NAS_HOST/photo' $MOUNT_POINT"
 fi

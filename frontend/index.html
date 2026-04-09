@@ -473,6 +473,56 @@
 </div>
 
 <script>
+// —— 视图切换&时间轴逻辑 ——
+let currentViewMode = 'grid';
+document.getElementById('gridViewBtn').onclick = () => setGridTimeline('grid');
+document.getElementById('timelineViewBtn').onclick = () => setGridTimeline('timeline');
+// 默认高亮
+setGridTimeline('grid');
+function setGridTimeline(mode) {
+  currentViewMode = mode;
+  document.getElementById('photoGrid').style.display = mode==='grid'?'':'none';
+  document.getElementById('timelineWrap').style.display = mode==='timeline'?'':'none';
+  document.getElementById('loadMore').style.display = mode==='grid'?'':'none';
+  document.getElementById('gridViewBtn').classList.toggle('active',mode==='grid');
+  document.getElementById('timelineViewBtn').classList.toggle('active',mode==='timeline');
+  if(mode==='timeline') renderTimeline(currentResults);
+}
+function renderTimeline(photos) {
+  // 按月分组，photos应有taken_at: YYYY-MM-DD/HH:MM:SS
+  const groups = {};
+  photos.forEach(p => {
+    const y = p.taken_at?.slice(0,7)||'未知时间';
+    if (!groups[y]) groups[y]=[];
+    groups[y].push(p);
+  });
+  const wrap = document.getElementById('timelineWrap');
+  wrap.innerHTML = '';
+  const months = Object.keys(groups).sort().reverse();
+  if (!months.length) {
+    wrap.innerHTML = '<div class="empty">暂无照片</div>';
+    return;
+  }
+  months.forEach(m => {
+    const g = document.createElement('div');
+    g.className = 'timeline-group';
+    const yy = m.slice(0,4), mm = m.slice(5,7);
+    g.innerHTML = `<div class='timeline-title'>${yy}年${mm}月（${groups[m].length}张）</div>`;
+    const row = document.createElement('div');
+    row.className = 'timeline-row';
+    groups[m].forEach((p,i) => {
+      const img = document.createElement('img');
+      img.className = 'timeline-thumb';
+      img.src = authUrl(`/api/thumb/${p.id}`);
+      img.alt = p.filename||'';
+      img.onclick = ()=>openLightbox(currentResults.indexOf(p));
+      row.appendChild(img);
+    });
+    g.appendChild(row);
+    wrap.appendChild(g);
+  });
+}
+
 const API = (location.hostname === 'localhost' || location.hostname === '127.0.0.1')
   ? `${location.protocol}//${location.hostname}:8765/api`
   : `${location.protocol}//${location.host}/api`;
@@ -809,7 +859,8 @@ async function doSearch(append = false) {
   currentResults = append ? [...currentResults, ...r.results] : r.results;
   currentOffset = currentResults.length;
 
-  renderGrid(r.results, append);
+  if(currentViewMode==='timeline') renderTimeline(currentResults);
+  else renderGrid(r.results, append);
   document.getElementById('statsBar').innerHTML =
     `共 <b>${r.total.toLocaleString()}</b> 张照片` +
     (q ? ` · 关键词: <b>${q}</b>` : '') +
