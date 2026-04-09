@@ -397,14 +397,13 @@ def _ensure_tables():
         );
         CREATE TABLE IF NOT EXISTS shares (
             id TEXT PRIMARY KEY,
-        );
-        CREATE TABLE IF NOT EXISTS favorites (
-            photo_id INTEGER PRIMARY KEY,
-            created_at TEXT
-        )
             album_id INTEGER,
             photo_ids TEXT,
             expires_at TEXT,
+            created_at TEXT
+        );
+        CREATE TABLE IF NOT EXISTS favorites (
+            photo_id INTEGER PRIMARY KEY,
             created_at TEXT
         );
     """)
