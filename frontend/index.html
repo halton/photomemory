@@ -302,6 +302,8 @@
   <!-- Leaflet JS -->
   <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
   <script src="https://unpkg.com/leaflet.markercluster/dist/leaflet.markercluster.js"></script>
+  <!-- Chart.js -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
 </head>
 <body>
 
@@ -313,6 +315,7 @@
   </div>
   <button class="btn secondary" onclick="showView('persons')">👤 人物管理</button>
   <button class="btn secondary" id="mapViewBtn" onclick="showMapView()">🗺️ 地图</button>
+  <button class="btn secondary" id="statsViewBtn" onclick="showStatsView()">📊 统计</button>
 </header>
 
 <div class="layout">
@@ -363,6 +366,7 @@
             <option value="09">9月</option><option value="10">10月</option>
             <option value="11">11月</option><option value="12">12月</option>
           </select>
+          <div id="hotCitiesBar" style="display:flex;gap:8px;margin-left:18px"></div>
         </div>
       </div>
       <div class="stats-bar" id="statsBar">加载中...</div>
@@ -377,6 +381,26 @@
         <div class="photo-grid" id="photoGrid"></div>
         <div class="load-more" id="loadMore">
           <button class="btn secondary" onclick="loadMore()">加载更多</button>
+        </div>
+      </div>
+
+      <!-- Stats view -->
+      <div id="statsView" style="display:none;margin:24px 0 0 0;padding:0 16px;">
+        <div style="display:flex;gap:18px;margin-bottom:28px;flex-wrap:wrap">
+          <div class="stat-card" id="statTotal" style="flex:1 0 180px;height:90px;background:#16213e;border-radius:16px;display:flex;flex-direction:column;justify-content:center;align-items:center;margin-bottom:8px;color:#e0e0e0;"><div style="font-size:15px;margin-bottom:7px;opacity:.77">总照片</div><div id="statTotalNum" style="font-size:28px;font-weight:bold;">-</div></div>
+          <div class="stat-card" id="statGps" style="flex:1 0 180px;height:90px;background:#16213e;border-radius:16px;display:flex;flex-direction:column;justify-content:center;align-items:center;margin-bottom:8px;color:#e0e0e0;"><div style="font-size:15px;margin-bottom:7px;opacity:.77">GPS照片</div><div id="statGpsNum" style="font-size:28px;font-weight:bold;">-</div></div>
+          <div class="stat-card" id="statCities" style="flex:1 0 180px;height:90px;background:#16213e;border-radius:16px;display:flex;flex-direction:column;justify-content:center;align-items:center;margin-bottom:8px;color:#e0e0e0;"><div style="font-size:15px;margin-bottom:7px;opacity:.77">城市数</div><div id="statCityNum" style="font-size:28px;font-weight:bold;">-</div></div>
+          <div class="stat-card" id="statSpan" style="flex:1 0 180px;height:90px;background:#16213e;border-radius:16px;display:flex;flex-direction:column;justify-content:center;align-items:center;margin-bottom:8px;color:#e0e0e0;"><div style="font-size:15px;margin-bottom:7px;opacity:.77">时间跨度</div><div id="statTimeSpan" style="font-size:18px;font-weight:bold;">-</div></div>
+        </div>
+        <div style="display:flex;gap:28px;flex-wrap:wrap">
+          <div style="flex:2 1 400px;min-width:330px;background:#1a1a2e;padding:22px 20px 16px 20px;border-radius:18px;margin-bottom:22px;">
+            <div style="font-size:15px;font-weight:600;color:#e94560;margin-bottom:12px">📅 月度照片数</div>
+            <canvas id="monthBarChart" style="width:100%;height:270px;max-height:270px;"></canvas>
+          </div>
+          <div style="flex:1 1 300px;min-width:250px;background:#1a1a2e;padding:22px 16px 16px 16px;border-radius:18px;margin-bottom:22px;">
+            <div style="font-size:15px;font-weight:600;color:#e94560;margin-bottom:12px">🏙️ Top10城市</div>
+            <canvas id="cityDoughnutChart" style="width:100%;height:270px;max-height:270px;"></canvas>
+          </div>
         </div>
       </div>
 
@@ -1112,12 +1136,80 @@ function filterByPerson(name) {
   doSearch();
 }
 
+// ── 统计仪表板视图 ──────────────────────────────
+let statsCharts = {};
+function showStatsView() {
+  document.getElementById('photosView').style.display = 'none';
+  document.getElementById('personsView').style.display = 'none';
+  document.getElementById('filtersBar').style.display = 'none';
+  document.getElementById('statsView').style.display = '';
+  document.getElementById('mapContainer').style.display = 'none';
+  document.getElementById('mapViewBtn').classList.remove('active');
+  document.getElementById('statsViewBtn').classList.add('active');
+  loadStatsDashboard();
+}
+async function loadStatsDashboard() {
+  // 获取4个统计卡片
+  const stats = await apiFetch('/stats').then(r=>r.json());
+  const locs = await apiFetch('/stats/locations').then(r=>r.json());
+  const timeline = await apiFetch('/stats/timeline').then(r=>r.json());
+  document.getElementById('statTotalNum').textContent = stats.total_photos;
+  document.getElementById('statGpsNum').textContent = stats.gps_photos || (stats.total_photos - (stats.no_gps_photos||0));
+  document.getElementById('statCityNum').textContent = (locs.locations||[]).length;
+  let span = '-';
+  if (timeline.timeline && timeline.timeline.length > 1) {
+    const t0 = timeline.timeline[0].date, t1 = timeline.timeline[timeline.timeline.length-1].date;
+    if (t0 !== t1) span = t0+ ' ~ ' + t1;
+    else span = t0;
+  }
+  document.getElementById('statTimeSpan').textContent = span;
+  // 月度Bar图
+  const months = (timeline.timeline||[]).map(e=>e.date), vals = (timeline.timeline||[]).map(e=>e.count);
+  if (statsCharts.monthBarChart) statsCharts.monthBarChart.destroy();
+  const ctx1 = document.getElementById('monthBarChart').getContext('2d');
+  statsCharts.monthBarChart = new Chart(ctx1, {
+    type: 'bar', data: {labels: months, datasets:[{label: '照片数',data:vals,backgroundColor:'#e94560'}]},
+    options: {plugins:{legend:{display: false}},scales:{x:{ticks:{color:'#aaa'}},y:{ticks:{color:'#aaa'}}},responsive:true}
+  });
+  // Top10城市 饼图
+  const top10 = (locs.locations||[]).slice(0,10);
+  if (statsCharts.cityDoughnutChart) statsCharts.cityDoughnutChart.destroy();
+  const ctx2 = document.getElementById('cityDoughnutChart').getContext('2d');
+  statsCharts.cityDoughnutChart = new Chart(ctx2, {
+    type:'doughnut',data:{labels:top10.map(e=>e.city),datasets:[{data:top10.map(e=>e.count),backgroundColor:["#e94560","#f7b801","#00b894","#0984e3","#6c5ce7","#00cec9","#fdcb6e","#e17055","#6366f1","#74b9ff"]}]},options:{plugins:{legend:{labels:{color:'#aaa'}}},responsive:true}
+  });
+}
+
+// 热门城市标签（filtersBar下）
+async function loadHotCitiesBar() {
+  const locs = await apiFetch('/stats/locations').then(r=>r.json());
+  const bar = document.getElementById('hotCitiesBar');
+  bar.innerHTML = '';
+  (locs.locations||[]).slice(0,8).forEach(loc=>{
+    const chip = document.createElement('span');
+    chip.textContent = loc.city;
+    chip.className = 'filter-chip';
+    chip.style.background = '#1a1a2e';
+    chip.style.borderColor = '#e94560';
+    chip.style.color = '#e94560';
+    chip.style.cursor = 'pointer';
+    chip.onclick = () => {
+      document.getElementById('searchInput').value = loc.city;
+      doSearch();
+    };
+    bar.appendChild(chip);
+  });
+}
+loadHotCitiesBar();
+
 // ── Views ─────────────────────────────────────────────────
 
 function showView(view) {
   document.getElementById('photosView').style.display = view === 'photos' ? '' : 'none';
   document.getElementById('personsView').style.display = view === 'persons' ? '' : 'none';
+  document.getElementById('statsView').style.display = 'none';
   document.getElementById('filtersBar').style.display = view === 'photos' ? '' : 'none';
+  document.getElementById('statsViewBtn').classList.remove('active');
   if (view === 'persons') loadPersonsView();
 }
 
