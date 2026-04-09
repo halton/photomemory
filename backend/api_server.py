@@ -397,6 +397,11 @@ def _ensure_tables():
         );
         CREATE TABLE IF NOT EXISTS shares (
             id TEXT PRIMARY KEY,
+        );
+        CREATE TABLE IF NOT EXISTS favorites (
+            photo_id INTEGER PRIMARY KEY,
+            created_at TEXT
+        )
             album_id INTEGER,
             photo_ids TEXT,
             expires_at TEXT,
@@ -410,6 +415,65 @@ def get_db():
     conn.row_factory = sqlite3.Row
     return conn
 
+
+# ── 收藏/喜欢 API ────────────────────────────────────────
+
+@app.route("/api/photos/<int:photo_id>/favorite", methods=["POST"])
+@require_auth
+def toggle_favorite(photo_id):
+    conn = get_db()
+    cur = conn.cursor()
+    row = cur.execute("SELECT 1 FROM favorites WHERE photo_id=?", (photo_id,)).fetchone()
+    if row:
+        cur.execute("DELETE FROM favorites WHERE photo_id=?", (photo_id,))
+        conn.commit()
+        conn.close()
+        return jsonify({"favorited": False})
+    else:
+        cur.execute(
+            "INSERT INTO favorites (photo_id, created_at) VALUES (?, ?)",
+            (photo_id, datetime.now().isoformat())
+        )
+        conn.commit()
+        conn.close()
+        return jsonify({"favorited": True})
+
+@app.route("/api/favorites", methods=["GET"])
+@require_auth
+def get_favorites():
+    limit = min(int(request.args.get("limit", 50)), 200)
+    offset = int(request.args.get("offset", 0))
+    conn = get_db()
+    c = conn.cursor()
+    fav_rows = c.execute(
+        "SELECT f.photo_id, p.* FROM favorites f JOIN photos p ON f.photo_id=p.id ORDER BY f.created_at DESC LIMIT ? OFFSET ?",
+        (limit, offset)
+    ).fetchall()
+    total = c.execute(
+        "SELECT COUNT(*) FROM favorites"
+    ).fetchone()[0]
+    results = []
+    for r in fav_rows:
+        results.append({
+            "id": r["id"],
+            "path": r["path"],
+            "filename": r["filename"],
+            "taken_at": r["taken_at"],
+            "gps_lat": r["gps_lat"],
+            "gps_lon": r["gps_lon"],
+            "gps_city": r["gps_city"],
+            "width": r["width"],
+            "height": r["height"],
+            "is_screenshot": bool(r["is_screenshot"]),
+            "is_duplicate": bool(r["is_duplicate"]),
+            "dir_label": r["dir_label"],
+            "size": r["size"],
+            "thumb_url": f"/api/thumb/{r['id']}",
+            "original_url": f"/api/photo/{r['id']}",
+            "is_favorite": True,
+        })
+    conn.close()
+    return jsonify({"results": results, "total": total, "limit": limit, "offset": offset})
 
 # ── 搜索 API ──────────────────────────────────────────────
 
@@ -529,6 +593,14 @@ def search():
     count_sql = f"SELECT COUNT(*) FROM photos p {where}"
     total = c.execute(count_sql, params[:-2]).fetchone()[0]
 
+    # 查询所有结果的id对应的收藏状态
+    photo_ids = [r["id"] for r in rows]
+    fav_set = set()
+    if photo_ids:
+        qmark = ','.join(['?'] * len(photo_ids))
+        rows_fav = c.execute(f"SELECT photo_id FROM favorites WHERE photo_id IN ({qmark})", photo_ids).fetchall()
+        fav_set = set(row["photo_id"] for row in rows_fav)
+
     results = []
     for r in rows:
         results.append({
@@ -546,6 +618,7 @@ def search():
             "dir_label": r["dir_label"],
             "thumb_url": f"/api/thumb/{r['id']}",
             "original_url": f"/api/photo/{r['id']}",
+            "is_favorite": r["id"] in fav_set
         })
 
     conn.close()
