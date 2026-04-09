@@ -381,6 +381,48 @@
     background: #e94560;
     color: #fff;
   }
+  .homepage-row-scroll {
+    display: flex;
+    flex-direction: row;
+    gap: 12px;
+    overflow-x: auto;
+    padding-bottom: 4px;
+    scrollbar-color: #e94560 #1a1a2e;
+  }
+  .homepage-row-scroll .photo-card {
+    flex: 0 0 200px;
+    max-width: 200px;
+    min-width: 200px;
+    background: #16213e;
+    border-radius: 12px;
+    overflow: hidden;
+    box-shadow: 0 2px 10px #111a;
+    cursor: pointer;
+    margin-bottom: 3px;
+  }
+  .homepage-row-scroll .photo-card img {
+    width: 100%;
+    aspect-ratio: 1/1;
+    object-fit: cover;
+    display: block;
+  }
+  .homepage-row-scroll .photo-card .overlay {
+    background: linear-gradient(transparent,rgba(0,0,0,0.9));
+    position: absolute;
+    left:0;right:0;bottom:0;
+    padding: 12px 10px 6px 10px;
+    color:#e0e0e0;
+    font-size:11px;
+    opacity:1;
+  }
+  .homepage-row-scroll::-webkit-scrollbar {
+    height: 9px;
+    background: #1a1a2e;
+  }
+  .homepage-row-scroll::-webkit-scrollbar-thumb {
+    background: #e94560;
+    border-radius: 16px;
+  }
 </style>
   <!-- Leaflet CSS -->
   <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
@@ -431,6 +473,7 @@
     <button class="btn" onclick="doSearch()">搜索</button>
   </div>
   <button class="btn secondary" onclick="showView('persons')">👤 人物</button>
+  <button class="btn secondary" id="albumsViewBtn" onclick="showView('albums')">📁 相册</button>
   <button class="btn secondary" id="mapViewBtn" onclick="showMapView()">🗺️ 地图</button>
   <button class="btn secondary" id="statsViewBtn" onclick="showStatsView()">📊 统计</button>
 </header>
@@ -502,6 +545,19 @@
         </div>
       </div>
 
+      <!-- Albums view -->
+      <div id="albumsView" style="display:none"></div>
+      <!-- 首页推荐区块 -->
+      <div id="homepageBlocks" style="display:none">
+        <div style="padding:16px 0 4px 16px">
+          <h3 style="color:#e94560;font-size:19px;margin-bottom:8px;font-weight:700">最近照片</h3>
+          <div id="recentPhotosRow" class="homepage-row-scroll"></div>
+        </div>
+        <div style="padding:16px 0 0 16px">
+          <h3 style="color:#e94560;font-size:19px;margin-bottom:8px;font-weight:700">随机精选</h3>
+          <div id="randomPhotosRow" class="homepage-row-scroll"></div>
+        </div>
+      </div>
       <!-- Stats view -->
       <div id="statsView" style="display:none;margin:24px 0 0 0;padding:0 16px;">
         <div style="display:flex;gap:18px;margin-bottom:28px;flex-wrap:wrap">
@@ -1204,6 +1260,17 @@ async function loadPersonsSidebar() {
 // ── Search ────────────────────────────────────────────────
 
 async function doSearch(append = false) {
+  // 首页推荐逻辑
+  const qv = document.getElementById('searchInput').value.trim();
+  if (!append && !qv && currentFilter==='all') {
+    document.getElementById('photosView').style.display = '';
+    document.getElementById('homepageBlocks').style.display = '';
+    document.getElementById('photoGrid').innerHTML = '';
+    loadHomepageBlocks();
+    return;
+  } else {
+    document.getElementById('homepageBlocks').style.display = 'none';
+  }
   if (!append) {
     currentOffset = 0;
     currentResults = [];
@@ -1273,6 +1340,42 @@ function lazyLoadImages() {
 
 // ── Render Grid ───────────────────────────────────────────
 
+// --- 首页推荐区块 ---
+function loadHomepageBlocks() {
+  // 最近照片
+  const recentRow = document.getElementById('recentPhotosRow');
+  recentRow.innerHTML = '<div style="color:#888;padding:30px 0">加载中...</div>';
+  apiFetch('/search?limit=12').then(r=>r.json()).then(r=>{
+    if(r.results && r.results.length){
+      recentRow.innerHTML = '';
+      r.results.forEach((p,i)=>{
+        const card = document.createElement('div');
+        card.className = 'photo-card';
+        card.innerHTML = `<img src="${authUrl('/api/thumb/'+p.id)}" style="width:100%;aspect-ratio:1/1;object-fit:cover;"><div class="overlay">${p.taken_at?p.taken_at.slice(0,10):''}</div>`;
+        card.onclick = ()=>openLightbox(i);
+        recentRow.appendChild(card);
+      });
+    }else{
+      recentRow.innerHTML = '<span style="color:#888">暂无照片</span>';
+    }
+  });
+  // 随机精选
+  const randRow = document.getElementById('randomPhotosRow');
+  randRow.innerHTML = '<div style="color:#888;padding:30px 0">加载中...</div>';
+  apiFetch('/photos/random?limit=6').then(r=>r.json()).then(r=>{
+    if(r.results && r.results.length){
+      randRow.innerHTML = '';
+      r.results.forEach((p,i)=>{
+        const card = document.createElement('div');
+        card.className = 'photo-card';
+        card.innerHTML = `<img src="${authUrl('/api/thumb/'+p.id)}" style="width:100%;aspect-ratio:1/1;object-fit:cover;"><div class="overlay">${p.taken_at?p.taken_at.slice(0,10):''}</div>`;
+        randRow.appendChild(card);
+      });
+    }else{
+      randRow.innerHTML = '<span style="color:#888">暂无照片</span>';
+    }
+  });
+}
 function renderGrid(photos, append) {
   const grid = document.getElementById('photoGrid');
   if (!append) grid.innerHTML = '';
@@ -1557,7 +1660,110 @@ loadHotCitiesBar();
 
 // ── Views ─────────────────────────────────────────────────
 
+// --- 相册视图 ---
+function showAlbumsView() {
+  const el = document.getElementById('albumsView');
+  el.innerHTML = `
+    <div style="background:#1a1a2e;padding:18px 16px 10px 16px;display:flex;align-items:center;justify-content:space-between;">
+      <div style="font-size:21px;font-weight:700;color:#e94560">📁 相册</div>
+      <button class="btn" style="font-size:13px" onclick="createAlbum()">＋ 新建相册</button>
+    </div>
+    <div id="albumsGrid" style="padding:14px 18px">
+      <div style="color:#888;padding:30px;text-align:center">加载中...</div>
+    </div>
+    <div id="albumPhotosWrap" style="display:none"></div>
+  `;
+  loadAlbums();
+}
+async function loadAlbums() {
+  const grid = document.getElementById('albumsGrid');
+  grid.innerHTML = '<div style="color:#888;padding:30px;text-align:center">加载中...</div>';
+  try {
+    const r = await apiFetch('/albums').then(r=>r.json());
+    if (!r.albums || !r.albums.length) {
+      grid.innerHTML = '<div class="empty"><div class="icon">📁</div><p>暂无相册，点击上方“新建相册”</p></div>';
+      return;
+    }
+    grid.innerHTML = '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:18px">'+
+      r.albums.map(a=>`
+        <div class="album-card" style="background:#16213e;border-radius:16px;overflow:hidden;cursor:pointer;box-shadow:0 2px 10px #111b;padding:0;position:relative;"
+             onclick="showAlbumPhotos('${a.id}')">
+          <img src="${a.cover_thumb?authUrl(a.cover_thumb):'https://dummyimage.com/360x240/23233a/aaa&text=No+Cover'}" style="width:100%;aspect-ratio:3/2.1;object-fit:cover;background:#181829;display:block;">
+          <div style="padding:13px 12px 10px 12px;">
+            <div style="font-weight:600;font-size:16px;color:#e0e0e0">${a.name}</div>
+            <div style="font-size:13px;color:#e94560;margin-top:4px">${a.photo_count||0} 张照片</div>
+          </div>
+        </div>
+      `).join('')+ '</div>';
+  } catch(e) {
+    grid.innerHTML = `<div class="empty"><div class="icon">⚠️</div><p>加载失败</p></div>`;
+  }
+}
+async function showAlbumPhotos(albumId) {
+  const wrap = document.getElementById('albumPhotosWrap');
+  wrap.style.display = '';
+  wrap.innerHTML = '<div style="background:#1a1a2e;padding:12px 15px;color:#e94560;font-weight:700">加载中...</div>';
+  try {
+    const r = await apiFetch(`/albums/${albumId}/photos`).then(r=>r.json());
+    wrap.innerHTML = `<div style="background:#1a1a2e;padding:12px 15px;display:flex;align-items:center;justify-content:space-between">
+      <div style="font-size:18px;color:#e94560;font-weight:600">相册照片</div>
+      <button class="btn secondary" style="font-size:12px" onclick="document.getElementById('albumPhotosWrap').style.display='none'">✕ 返回</button>
+    </div>
+    <div id="albumPhotoGrid" class="photo-grid" style="background:#16213e;border-radius:0 0 14px 14px;margin-bottom:0"></div>`;
+    const grid = document.getElementById('albumPhotoGrid');
+    if (!r.photos || !r.photos.length) {
+      grid.innerHTML = '<div class="empty"><div class="icon">🖼️</div><p>暂无照片</p></div>';
+      return;
+    }
+    (r.photos).forEach((p,i)=>{
+      const card = document.createElement('div');
+      card.className = 'photo-card';
+      card.style.background = '#1a1a2e';
+      card.innerHTML = `<img src="${authUrl('/api/thumb/'+p.id)}" style="width:100%;height:100%;object-fit:cover;">
+        <div class="overlay">${p.taken_at?p.taken_at.slice(0,10):''}</div>`;
+      card.onclick = ()=>openLightbox(currentResults.findIndex(x=>x.id===p.id));
+      grid.appendChild(card);
+    });
+  } catch(e) {
+    wrap.innerHTML = `<div class="empty"><div class="icon">⚠️</div><p>加载失败</p></div>`;
+  }
+}
+function createAlbum() {
+  if(document.getElementById('modalCreateAlbum'))return;
+  const modal=document.createElement('div');
+  modal.className='modal-backdrop open';
+  modal.id='modalCreateAlbum';
+  modal.innerHTML=`<div class="modal"><h3>新建相册</h3><input type="text" id="albumNameInput" placeholder="相册名称"/><div class="modal-actions"><button class="btn secondary" onclick="document.getElementById('modalCreateAlbum').remove()">取消</button><button class="btn" onclick="submitCreateAlbum()">创建</button></div></div>`;
+  document.body.appendChild(modal);
+  setTimeout(()=>document.getElementById('albumNameInput').focus(),100);
+}
+async function submitCreateAlbum(){
+  const n=document.getElementById('albumNameInput').value.trim();
+  if(!n)return;document.querySelector('#modalCreateAlbum .btn').disabled=true;
+  try{
+    let r=await apiFetch('/albums',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:n})});
+    let d=await r.json();if(r.ok){document.getElementById('modalCreateAlbum').remove();loadAlbums();}else{alert(d.error||'创建失败')}
+  }catch{alert('网络/服务器错误')}
+}
+window.showAlbumsView=showAlbumsView;
+window.loadAlbums=loadAlbums;
+window.showAlbumPhotos=showAlbumPhotos;
+window.createAlbum=createAlbum;
+// --- 视图切换 ---
 function showView(view) {
+  document.getElementById('albumsView').style.display = view === 'albums' ? '' : 'none';
+  document.getElementById('albumsViewBtn').classList.remove('active');
+  document.getElementById('homepageBlocks').style.display = 'none';
+  if(view==='albums') {
+    document.getElementById('photosView').style.display = 'none';
+    document.getElementById('personsView').style.display = 'none';
+    document.getElementById('statsView').style.display = 'none';
+    document.getElementById('filtersBar').style.display = 'none';
+    document.getElementById('albumsViewBtn').classList.add('active');
+    document.getElementById('albumsView').style.display = '';
+    showAlbumsView();
+    return;
+  }
   document.getElementById('photosView').style.display = view === 'photos' ? '' : 'none';
   document.getElementById('personsView').style.display = view === 'persons' ? '' : 'none';
   document.getElementById('statsView').style.display = 'none';
@@ -1565,6 +1771,7 @@ function showView(view) {
   document.getElementById('statsViewBtn').classList.remove('active');
   if (view === 'persons') loadPersonsView();
 }
+
 
 async function loadPersonsView() {
   const r = await apiFetch(`/persons`).then(r => r.json());
