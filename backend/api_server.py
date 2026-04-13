@@ -174,7 +174,11 @@ def force_https():
 
 @app.route("/")
 def index():
-    return app.send_static_file("index.html")
+    resp = app.send_static_file("index.html")
+    resp.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+    resp.headers["Pragma"] = "no-cache"
+    resp.headers["Expires"] = "0"
+    return resp
 
 # ── Pairing 接口 ──────────────────────────────────────────
 
@@ -284,6 +288,31 @@ def pair_list():
         "pending": [safe(v) for v in _devices["pending"].values()],
         "paired":  [safe(v) for v in _devices["paired"].values()],
     })
+
+
+@app.route("/reset-auth")
+def reset_auth_page():
+    """清除浏览器 localStorage/cookie 中的配对凭证，强制重新配对"""
+    html = """
+<!DOCTYPE html><html><head><meta charset="utf-8">
+<title>Reset Auth - PhotoMemory</title>
+<style>body{background:#111;color:#eee;font-family:sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;}</style>
+</head><body>
+<div style="text-align:center">
+  <div style="font-size:48px">🔄</div>
+  <h2>正在清除凭证...</h2>
+  <p style="color:#888">清除后自动跳转到配对页面</p>
+</div>
+<script>
+  ['pm_device_id','pm_token'].forEach(k => {
+    localStorage.removeItem(k);
+    document.cookie = k + '=;expires=Thu, 01 Jan 1970 00:00:00 GMT;path=/';
+  });
+  setTimeout(() => { window.location.href = '/'; }, 1000);
+</script>
+</body></html>
+"""
+    return html
 
 
 @app.route("/admin")

@@ -99,15 +99,15 @@ def detect_faces(db_path: str, limit=None):
     IMAGE_EXTS = ('.jpg', '.jpeg', '.png', '.heic', '.heif', '.bmp', '.tiff', '.tif')
     already = {r[0] for r in c.execute("SELECT DISTINCT photo_id FROM faces")}
 
-    query = "SELECT id, path FROM photos WHERE is_screenshot=0"
-    if limit:
-        query += f" LIMIT {limit}"
-    rows = c.execute(query).fetchall()
+    rows = c.execute("SELECT id, path FROM photos WHERE is_screenshot=0").fetchall()
 
-    # 过滤已处理
+    # 过滤已处理 + 仅图片
     rows = [(pid, path) for pid, path in rows
             if pid not in already
             and Path(path).suffix.lower() in IMAGE_EXTS]
+
+    if limit and len(rows) > limit:
+        rows = rows[:limit]
 
     if not rows:
         print("没有新图片需要检测。")

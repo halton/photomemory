@@ -2055,20 +2055,6 @@ function showAlbumsView() {
     modal.innerHTML = `<div class="modal"><h3 style='margin-bottom:16px;font-size:15px;'>相册分享链接</h3><div class='modal-share-link' id='albumShareLink'></div><button class='modal-share-copy' id='albumShareCopyBtn'>复制链接</button><div class="modal-actions" style="margin-top:12px;justify-content:center;"><button class="btn secondary" onclick="closeAlbumShareModal()">关闭</button></div></div>`;
     document.body.appendChild(modal);
   }
-}
-function openAlbumShareModal(url) {
-  document.getElementById('albumShareLink').textContent = url;
-  document.getElementById('albumShareModal').style.display = 'flex';
-  document.getElementById('albumShareCopyBtn').onclick = () => {
-    navigator.clipboard.writeText(url);
-    document.getElementById('albumShareCopyBtn').textContent = '已复制';
-    setTimeout(()=>{document.getElementById('albumShareCopyBtn').textContent='复制链接';},1200);
-  };
-}
-function closeAlbumShareModal() {
-  document.getElementById('albumShareModal').style.display='none';
-}
-
   const el = document.getElementById('albumsView');
   el.innerHTML = `
     <div style="background:#1a1a2e;padding:18px 16px 10px 16px;display:flex;align-items:center;justify-content:space-between;">
@@ -2082,6 +2068,18 @@ function closeAlbumShareModal() {
     <div id="albumPhotosWrap" style="display:none"></div>
   `;
   loadAlbums();
+} // end showAlbumsView
+function openAlbumShareModal(url) {
+  document.getElementById('albumShareLink').textContent = url;
+  document.getElementById('albumShareModal').style.display = 'flex';
+  document.getElementById('albumShareCopyBtn').onclick = () => {
+    navigator.clipboard.writeText(url);
+    document.getElementById('albumShareCopyBtn').textContent = '已复制';
+    setTimeout(()=>{document.getElementById('albumShareCopyBtn').textContent='复制链接';},1200);
+  };
+}
+function closeAlbumShareModal() {
+  document.getElementById('albumShareModal').style.display='none';
 }
 async function loadAlbums() {
   const grid = document.getElementById('albumsGrid');
