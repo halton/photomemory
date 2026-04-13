@@ -233,6 +233,31 @@
   .person-card:hover .pedit { display: block; }
   .person-card { cursor: pointer; }
 
+  /* Person photo preview grid (for unnamed persons) */
+  .person-preview-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 3px; margin: 8px 0 4px; border-radius: 6px; overflow: hidden; }
+  .person-preview-grid img { width: 100%; aspect-ratio: 1; object-fit: cover; background: #222; }
+
+  /* Batch naming mode */
+  .batch-name-input { width: 90%; background: #2a2a2a; border: 1px solid #3a3a3a; border-radius: 6px; padding: 5px 8px; color: #e0e0e0; font-size: 12px; outline: none; margin-top: 6px; text-align: center; }
+  .batch-name-input:focus { border-color: #6366f1; box-shadow: 0 0 0 2px rgba(99,102,241,0.3); }
+  .batch-name-input.saved { border-color: #22c55e; }
+
+  /* Yearly stats chart */
+  .yearly-chart-wrap { background: #1a1a2e; padding: 22px 20px 16px; border-radius: 18px; margin-bottom: 22px; }
+  .yearly-chart-title { font-size: 15px; font-weight: 600; color: #e94560; margin-bottom: 16px; }
+  .yearly-bar-chart { display: flex; align-items: flex-end; gap: 6px; height: 180px; padding-bottom: 24px; position: relative; }
+  .yearly-bar-chart .bar-col { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 4px; position: relative; height: 100%; justify-content: flex-end; }
+  .yearly-bar-chart .bar { background: #6366f1; border-radius: 4px 4px 0 0; min-height: 2px; width: 70%; max-width: 48px; transition: background 0.2s; }
+  .yearly-bar-chart .bar:hover { background: #e94560; }
+  .yearly-bar-chart .bar-label { font-size: 10px; color: #888; white-space: nowrap; }
+  .yearly-bar-chart .bar-val { font-size: 10px; color: #aaa; }
+  .top-months-list { margin-top: 12px; }
+  .top-months-list .top-month-item { display: flex; align-items: center; gap: 10px; padding: 6px 0; font-size: 13px; color: #ccc; }
+  .top-months-list .top-month-rank { color: #e94560; font-weight: 700; font-size: 16px; width: 24px; text-align: center; }
+  .top-months-list .top-month-bar { flex: 1; height: 6px; background: #2a2a2a; border-radius: 3px; overflow: hidden; }
+  .top-months-list .top-month-bar-fill { height: 100%; background: #e94560; border-radius: 3px; }
+  .top-months-list .top-month-count { color: #888; font-size: 12px; min-width: 40px; text-align: right; }
+
   /* Person Browse Modal */
   .person-browse-box {
     background: #1a1a1a; border: 1px solid #2a2a2a; border-radius: 16px;
@@ -718,6 +743,17 @@
           <div class="stat-card" id="statCities" style="flex:1 0 180px;height:90px;background:#16213e;border-radius:16px;display:flex;flex-direction:column;justify-content:center;align-items:center;margin-bottom:8px;color:#e0e0e0;"><div style="font-size:15px;margin-bottom:7px;opacity:.77">城市数</div><div id="statCityNum" style="font-size:28px;font-weight:bold;">-</div></div>
           <div class="stat-card" id="statSpan" style="flex:1 0 180px;height:90px;background:#16213e;border-radius:16px;display:flex;flex-direction:column;justify-content:center;align-items:center;margin-bottom:8px;color:#e0e0e0;"><div style="font-size:15px;margin-bottom:7px;opacity:.77">时间跨度</div><div id="statTimeSpan" style="font-size:18px;font-weight:bold;">-</div></div>
         </div>
+        <!-- Yearly distribution bar chart (pure CSS) -->
+        <div style="display:flex;gap:18px;flex-wrap:wrap;margin-bottom:22px">
+          <div class="yearly-chart-wrap" style="flex:2 1 400px;min-width:330px">
+            <div class="yearly-chart-title">📊 年度照片分布</div>
+            <div class="yearly-bar-chart" id="yearlyBarChart"></div>
+          </div>
+          <div class="yearly-chart-wrap" style="flex:1 1 280px;min-width:250px">
+            <div class="yearly-chart-title">🔥 最活跃拍照月份 Top 3</div>
+            <div class="top-months-list" id="topMonthsList"></div>
+          </div>
+        </div>
         <div style="display:flex;gap:28px;flex-wrap:wrap">
           <div style="flex:2 1 400px;min-width:330px;background:#1a1a2e;padding:22px 20px 16px 20px;border-radius:18px;margin-bottom:22px;">
             <div style="font-size:15px;font-weight:600;color:#e94560;margin-bottom:12px">📅 月度照片数</div>
@@ -734,6 +770,8 @@
       <div id="personsView" style="display:none">
         <div style="padding:12px 16px;border-bottom:1px solid #222;display:flex;align-items:center;gap:12px">
           <button class="btn" id="btnFaceScan" onclick="startFaceScan()" style="font-size:12px;padding:6px 14px">🔍 识别新照片</button>
+          <button class="btn secondary" id="btnBatchName" onclick="toggleBatchNaming()" style="font-size:12px;padding:6px 14px">✏️ 批量命名</button>
+          <span id="batchNameStatus" style="display:none;color:#22c55e;font-size:12px"></span>
           <span id="faceScanStatus" style="display:none;color:#aaa;font-size:12px"></span>
           <button onclick="deletePersonPrompt(currentPersonCard)" id="btnDeletePerson" style="display:none;margin-left:auto;background:none;border:1px solid rgba(239,68,68,0.4);color:#ef4444;border-radius:6px;padding:5px 12px;cursor:pointer;font-size:12px">🗑️ 删除人物</button>
         </div>
@@ -1878,6 +1916,36 @@ async function loadStatsDashboard() {
     else span = t0;
   }
   document.getElementById('statTimeSpan').textContent = span;
+
+  // ── Yearly bar chart (pure CSS) ──
+  const yearlyData = {};
+  (timeline.timeline||[]).forEach(e => {
+    const y = e.date ? e.date.substring(0, 4) : null;
+    if (y) yearlyData[y] = (yearlyData[y] || 0) + e.count;
+  });
+  const years = Object.keys(yearlyData).sort();
+  const maxYearCount = Math.max(...Object.values(yearlyData), 1);
+  const yearlyChart = document.getElementById('yearlyBarChart');
+  if (yearlyChart) {
+    yearlyChart.innerHTML = years.map(y => {
+      const pct = (yearlyData[y] / maxYearCount * 100).toFixed(1);
+      return `<div class="bar-col"><div class="bar-val">${yearlyData[y]}</div><div class="bar" style="height:${pct}%" title="${y}: ${yearlyData[y]}张"></div><div class="bar-label">${y}</div></div>`;
+    }).join('');
+  }
+
+  // ── Top 3 active months ──
+  const monthlyArr = (timeline.timeline||[]).map(e => ({month: e.date, count: e.count})).sort((a,b) => b.count - a.count);
+  const top3 = monthlyArr.slice(0, 3);
+  const topMax = top3.length ? top3[0].count : 1;
+  const topList = document.getElementById('topMonthsList');
+  if (topList) {
+    const medals = ['🥇','🥈','🥉'];
+    topList.innerHTML = top3.map((m, i) => {
+      const pct = (m.count / topMax * 100).toFixed(1);
+      return `<div class="top-month-item"><span class="top-month-rank">${medals[i]||i+1}</span><span style="min-width:70px">${m.month}</span><div class="top-month-bar"><div class="top-month-bar-fill" style="width:${pct}%"></div></div><span class="top-month-count">${m.count}张</span></div>`;
+    }).join('');
+  }
+
   // 月度Bar图
   const months = (timeline.timeline||[]).map(e=>e.date), vals = (timeline.timeline||[]).map(e=>e.count);
   if (statsCharts.monthBarChart) statsCharts.monthBarChart.destroy();
@@ -2134,23 +2202,103 @@ async function loadPersonsView() {
     return;
   }
 
+  window._personsData = r.persons;
   r.persons.forEach(p => {
     const card = document.createElement('div');
     card.className = 'person-card';
+    card.dataset.personId = p.id;
+    card.dataset.named = p.name ? '1' : '0';
+    let previewHtml = !p.name ? `<div class="person-preview-grid" id="preview-${p.id}"></div>` : '';
     card.innerHTML = `
       <img src="${p.thumb_url ? authUrl(p.thumb_url) : ''}"
            onerror="this.style.background='#333';this.src=''">
       <div class="pname">${p.name || '未命名'}</div>
+      ${previewHtml}
       <div class="pcount">${p.face_count} 张照片</div>
       <div class="pedit">✏️ 点击命名 / 浏览</div>
-      <button onclick="deletePersonFromView(${p.id}, '${(p.name||'').replace(/'/g,"\\'") }', event)"
+      <button onclick="deletePersonFromView(${p.id}, '${(p.name||'').replace(/'/g,"\\'" ) }', event)"
         style="position:absolute;top:8px;right:8px;background:none;border:none;color:transparent;cursor:pointer;font-size:14px;padding:2px 5px;border-radius:4px"
         onmouseenter="this.style.color='#ef4444'" onmouseleave="this.style.color='transparent'"
         title="删除人物">🗑️</button>`;
     card.style.position = 'relative';
     card.onclick = () => openPersonBrowse(p);
     grid.appendChild(card);
+    if (!p.name) loadPersonPreview(p.id);
   });
+  if (window._batchNamingActive) applyBatchNamingUI();
+}
+
+// ── Person Preview Photos ─────────────────────────────────
+async function loadPersonPreview(personId) {
+  try {
+    const r = await apiFetch(`/persons/${personId}/photos`).then(r => r.json());
+    const grid = document.getElementById(`preview-${personId}`);
+    if (!grid || !r.photos) return;
+    grid.innerHTML = r.photos.slice(0, 4).map(ph =>
+      `<img src="${authUrl(ph.thumb_url || ph.photo_url)}" loading="lazy" onerror="this.style.background='#333'">`
+    ).join('');
+  } catch(e) {}
+}
+
+// ── Batch Naming Mode ─────────────────────────────────────
+window._batchNamingActive = false;
+function toggleBatchNaming() {
+  window._batchNamingActive = !window._batchNamingActive;
+  const btn = document.getElementById('btnBatchName');
+  const status = document.getElementById('batchNameStatus');
+  if (window._batchNamingActive) {
+    btn.textContent = '✅ 退出批量命名';
+    btn.classList.remove('secondary');
+    applyBatchNamingUI();
+  } else {
+    btn.textContent = '✏️ 批量命名';
+    btn.classList.add('secondary');
+    status.style.display = 'none';
+    loadPersonsView();
+  }
+}
+function applyBatchNamingUI() {
+  const grid = document.getElementById('personsGrid');
+  const cards = grid.querySelectorAll('.person-card[data-named="0"]');
+  cards.forEach(card => {
+    if (card.querySelector('.batch-name-input')) return;
+    const editDiv = card.querySelector('.pedit');
+    if (editDiv) editDiv.style.display = 'none';
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.className = 'batch-name-input';
+    input.placeholder = '输入名字...';
+    input.dataset.personId = card.dataset.personId;
+    input.onclick = (e) => e.stopPropagation();
+    input.onkeydown = (e) => { if (e.key === 'Enter') { e.preventDefault(); saveBatchName(input); } };
+    card.appendChild(input);
+  });
+  const firstInput = grid.querySelector('.batch-name-input:not([disabled])');
+  if (firstInput) firstInput.focus();
+}
+async function saveBatchName(input) {
+  const name = input.value.trim();
+  const personId = input.dataset.personId;
+  if (!name || !personId) return;
+  input.disabled = true;
+  try {
+    await apiFetch(`/persons/${personId}`, {
+      method: 'PATCH',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({name}),
+    });
+    input.classList.add('saved');
+    const card = input.closest('.person-card');
+    const pname = card.querySelector('.pname');
+    if (pname) pname.textContent = name;
+    card.dataset.named = '1';
+    const status = document.getElementById('batchNameStatus');
+    status.textContent = `✓ 已保存: ${name}`;
+    status.style.display = '';
+    const allInputs = document.querySelectorAll('.batch-name-input:not([disabled])');
+    if (allInputs.length > 0) allInputs[0].focus();
+    else { status.textContent = '🎉 所有人物已命名！'; setTimeout(() => loadPersonsSidebar(), 500); }
+  } catch(e) { input.disabled = false; input.style.borderColor = '#ef4444'; }
 }
 
 // ── Person Browse Modal ───────────────────────────────────
