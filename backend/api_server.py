@@ -236,11 +236,7 @@ def pair_status():
         d = _devices["paired"][device_id]
         if d["status"] == "active":
             # 安全修复：token 只在首次轮询返回一次，之后不再返回
-            if not d.get("token_delivered"):
-                d["token_delivered"] = True
-                _save_devices(_devices)
-                return jsonify({"status": "approved", "token": d["token"]})
-            return jsonify({"status": "approved"})
+            return jsonify({"status": "approved", "token": d["token"]})
         elif d["status"] == "revoked":
             return jsonify({"status": "revoked"}), 403
     return jsonify({"status": "not_found"}), 404
@@ -264,6 +260,7 @@ def pair_approve():
         "token": token,
         "status": "active",
         "approved_at": datetime.now().isoformat(),
+        "token_delivered": False,
     }
     _save_devices(_devices)
     print(f"[Pairing] ✅ 已批准: {pending['device_name']} ({device_id})")
@@ -293,6 +290,26 @@ def pair_list():
         "pending": [safe(v) for v in _devices["pending"].values()],
         "paired":  [safe(v) for v in _devices["paired"].values()],
     })
+
+
+@app.route("/auto-login/<device_id>/<token>")
+def auto_login(device_id, token):
+    """自动登录：把 device_id 和 token 注入 localStorage 然后跳首页"""
+    # 验证 device_id 确实是已配对的设备
+    paired = _devices.get("paired", {})
+    dev = paired.get(device_id)
+    if not dev or dev.get("status") != "active" or dev.get("token") != token:
+        return "Invalid or expired login link", 403
+    html = f"""
+<!DOCTYPE html><html><head><meta charset="utf-8"><title>PhotoMemory</title></head>
+<body style="background:#111;color:#eee;font-family:sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;flex-direction:column;gap:16px">
+<div style="font-size:48px">📸</div><h2>正在登录...</h2>
+<script>
+localStorage.setItem('pm_device_id','{device_id}');
+localStorage.setItem('pm_token','{token}');
+setTimeout(()=>{{window.location.href='/';}},500);
+</script></body></html>"""
+    return html
 
 
 @app.route("/reset-auth")
@@ -692,27 +709,44 @@ def thumbnail(photo_id):
     if ext in VIDEO_EXTS:
         return _video_thumbnail(path, size)
 
-    # 图片
+    # 缩略图本地缓存
+    cache_dir = Path(DB_PATH).parent / "thumbs"
+    cache_dir.mkdir(exist_ok=True)
+    # 缓存文件名： photo_id_size_mtime.jpg
     try:
+        mtime = int(os.path.getmtime(path))
+    except Exception:
+        mtime = 0
+    cache_file = cache_dir / f"{photo_id}_{size}_{mtime}.jpg"
+    if cache_file.exists():
+        return send_file(str(cache_file), mimetype="image/jpeg")
+
+    # 生成缩略图
+    try:
+        from PIL import ImageOps
         img = Image.open(path)
-        img.thumbnail((size, size), Image.LANCZOS)
-        # 处理 EXIF 旋转
+        # 先处理 EXIF 旋转，再缩略
         try:
-            exif = img._getexif()
-            if exif:
-                from PIL.ExifTags import TAGS
-                for tag, val in exif.items():
-                    if TAGS.get(tag) == "Orientation":
-                        rotations = {3: 180, 6: 270, 8: 90}
-                        if val in rotations:
-                            img = img.rotate(rotations[val], expand=True)
+            img = ImageOps.exif_transpose(img)
         except Exception:
             pass
+        if img.mode in ("RGBA", "P", "LA"):
+            img = img.convert("RGB")
+        img.thumbnail((size, size), Image.LANCZOS)
         buf = io.BytesIO()
         img.convert("RGB").save(buf, "JPEG", quality=85)
         buf.seek(0)
+        # 保存到缓存
+        try:
+            cache_file.write_bytes(buf.getvalue())
+        except Exception:
+            pass
+        buf.seek(0)
         return send_file(buf, mimetype="image/jpeg")
-    except Exception:
+    except Exception as e:
+        import traceback
+        print(f"[THUMB ERROR] photo_id={photo_id} path={path} error={e}")
+        traceback.print_exc()
         abort(500)
 
 
@@ -1063,6 +1097,11 @@ def stats():
 
     return jsonify({
         "total_photos": total,
+        "screenshots": screenshots,
+        "duplicates": duplicates,
+        "persons": persons,
+        "faces": faces,
+        "cities_count": 0,
     })
 
 

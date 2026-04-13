@@ -1336,7 +1336,8 @@ async function init() {
     const grid = document.getElementById('photoGrid');
     grid.innerHTML = '<div class="skeleton-grid" style="grid-column:1/-1;padding:30px 0;display:grid;grid-template-columns:repeat(4,1fr);gap:12px">'+Array(8).fill('').map(_=>'<div class="skeleton-box"></div>').join('')+'</div>';
     setTimeout(()=>{},350);
-    const r = await apiFetch('/photos/random?limit=9').then(r=>r.json());
+    const resp = await apiFetch('/photos/random?limit=9');
+    const r = resp.status === 200 ? await resp.json() : null;
     if (r && r.results && r.results.length>0) {
       renderGrid(r.results, false);
       document.getElementById('statsBar').innerHTML = `<b>随机照片</b>`;
@@ -1379,26 +1380,36 @@ function authUrl(path) {
 async function apiFetch(path, opts = {}) {
   const headers = Object.assign({}, opts.headers || {}, authHeaders());
   const r = await fetch(`${API}${path}`, {...opts, headers, credentials: 'include'});
-  // 注意：不在这里处理 401，避免 checkAuth 循环调用
+  if (r.status === 401) {
+    // token 失效，清除凭证并重新显示登录页
+    localStorage.removeItem('pm_token');
+    localStorage.removeItem('pm_device_id');
+    showLoginPanel('loginRequest');
+    document.getElementById('loginOverlay').classList.add('show');
+  }
   return r;
 }
 
 // ── Stats ─────────────────────────────────────────────────
 
 async function loadStats() {
-  const r = await apiFetch(`/stats`).then(r => r.json());
-  document.getElementById('count-all').textContent = r.total_photos.toLocaleString();
-  document.getElementById('count-no_screenshots').textContent =
-    (r.total_photos - r.screenshots).toLocaleString();
-  document.getElementById('count-duplicates').textContent = r.duplicates.toLocaleString();
-
-  // 清理按钮（仅在有数据时显示）
-  const cleanupBar = document.getElementById('cleanupBar');
-  const dupBtn = document.getElementById('btnCleanDup');
-  const ssBtn = document.getElementById('btnCleanSS');
-  if (dupBtn) { dupBtn.textContent = `🗑️ 清理重复 (${r.duplicates}张)`; dupBtn.dataset.count = r.duplicates; }
-  if (ssBtn) { ssBtn.textContent = `🗑️ 清理截图 (${r.screenshots}张)`; ssBtn.dataset.count = r.screenshots; }
-  if (cleanupBar) cleanupBar.style.display = (r.duplicates > 0 || r.screenshots > 0) ? 'flex' : 'none';
+  try {
+    const resp = await apiFetch(`/stats`);
+    if (resp.status !== 200) return;
+    const r = await resp.json();
+    const total = r.total_photos || 0;
+    const screenshots = r.screenshots || 0;
+    const duplicates = r.duplicates || 0;
+    document.getElementById('count-all').textContent = total.toLocaleString();
+    document.getElementById('count-no_screenshots').textContent = (total - screenshots).toLocaleString();
+    document.getElementById('count-duplicates').textContent = duplicates.toLocaleString();
+    const cleanupBar = document.getElementById('cleanupBar');
+    const dupBtn = document.getElementById('btnCleanDup');
+    const ssBtn = document.getElementById('btnCleanSS');
+    if (dupBtn) { dupBtn.textContent = `🗑️ 清理重复 (${duplicates}张)`; dupBtn.dataset.count = duplicates; }
+    if (ssBtn) { ssBtn.textContent = `🗑️ 清理截图 (${screenshots}张)`; ssBtn.dataset.count = screenshots; }
+    if (cleanupBar) cleanupBar.style.display = (duplicates > 0 || screenshots > 0) ? 'flex' : 'none';
+  } catch(e) { console.warn('loadStats failed:', e); }
 }
 
 // ── Years ─────────────────────────────────────────────────
@@ -1515,7 +1526,7 @@ function lazyLoadImages() {
     entries.forEach(entry=>{
       if(entry.isIntersecting) {
         let img = entry.target;
-        if(img.dataset.src && !img.src) {
+        if(img.dataset.src && img.src !== img.dataset.src) {
           img.src = img.dataset.src;
         }
         obs.unobserve(img);
@@ -1523,7 +1534,7 @@ function lazyLoadImages() {
     });
   },{rootMargin:'80px'});
   document.querySelectorAll('img.lazy-img').forEach(img=>{
-    if(!img.src) observer.observe(img);
+    if(!img.src || img.src === window.location.href) observer.observe(img);
   });
 }
 
@@ -1698,8 +1709,8 @@ function renderGrid(photos, append) {
 
     const date = p.taken_at ? p.taken_at.substring(0, 10).replace(/:/g, '-') : '';
     card.innerHTML = `
-      <img data-src="${authUrl(`/api/thumb/${p.id}`)}" alt="${p.filename}" class="lazy-img"
-           onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22/>'">
+      <img src="${authUrl(`/api/thumb/${p.id}`)}" alt="${p.filename}" class="lazy-img"
+           onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22/>'" loading="lazy">
       ${p.is_duplicate ? '<span class="badge dup">重复</span>' : ''}
       ${p.is_screenshot ? '<span class="badge shot">截图</span>' : ''}
       <div class="overlay"><div class="date">${date}</div></div>`;
