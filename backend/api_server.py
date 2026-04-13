@@ -80,9 +80,15 @@ def _check_auth():
     if not PAIRING_ENABLED:
         return True, "open"
 
-    # localhost 直接放行（127.0.0.1 / ::1）
+    # localhost 直接放行，但只在没有反向代理转发头的情况下
+    # Cloudflare Tunnel 把公网请求转发到 127.0.0.1，需要排除
     remote = request.remote_addr or ""
-    if remote in ("127.0.0.1", "::1", "localhost"):
+    is_local = remote in ("127.0.0.1", "::1", "localhost")
+    # 如果有 CF-Connecting-IP 或 X-Forwarded-For，说明是通过代理来的公网请求
+    cf_ip = request.headers.get("Cf-Connecting-Ip", "")
+    x_forwarded = request.headers.get("X-Forwarded-For", "")
+    is_proxied = bool(cf_ip or x_forwarded)
+    if is_local and not is_proxied:
         return True, "localhost"
 
     # 1. Bearer token + device_id（优先，API / 原生客户端 / 浏览器）
