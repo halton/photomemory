@@ -162,7 +162,8 @@ VIDEO_EXTS = {'.mov', '.mp4', '.avi', '.mkv', '.m4v', '.3gp'}
 
 FRONTEND_DIR = os.path.join(os.path.dirname(__file__), "..", "frontend")
 app = Flask(__name__, static_folder=FRONTEND_DIR, static_url_path="/")
-CORS(app)
+# 限制 CORS 来源（生产环境应配置具体域名）
+CORS(app, origins=["http://localhost:*", "https://localhost:*"], supports_credentials=True)
 
 @app.before_request
 def force_https():
@@ -234,8 +235,12 @@ def pair_status():
     if device_id in _devices["paired"]:
         d = _devices["paired"][device_id]
         if d["status"] == "active":
-            # 颁发 token（只在 status 轮询时返回一次，之后 token 已在 paired 记录）
-            return jsonify({"status": "approved", "token": d["token"]})
+            # 安全修复：token 只在首次轮询返回一次，之后不再返回
+            if not d.get("token_delivered"):
+                d["token_delivered"] = True
+                _save_devices(_devices)
+                return jsonify({"status": "approved", "token": d["token"]})
+            return jsonify({"status": "approved"})
         elif d["status"] == "revoked":
             return jsonify({"status": "revoked"}), 403
     return jsonify({"status": "not_found"}), 404
@@ -860,6 +865,7 @@ def update_person(person_id):
 
 
 @app.route("/api/face_thumb/<int:face_id>")
+@require_auth
 def face_thumbnail(face_id):
     conn = get_db()
     row = conn.execute("SELECT photo_path, bbox, person_id FROM faces WHERE id=?", (face_id,)).fetchone()
@@ -918,6 +924,7 @@ def face_thumbnail(face_id):
 
 
 @app.route("/api/photo_persons/<int:photo_id>")
+@require_auth
 def photo_persons(photo_id):
     """返回某张照片中出现的所有命名人物"""
     conn = get_db()
@@ -1463,7 +1470,7 @@ def create_share():
     photo_ids = data.get("photo_ids")
     expires_hours = int(data.get("expires_hours", 72))
     expires_at = (datetime.now() + timedelta(hours=expires_hours)).isoformat()
-    share_id = uuid.uuid4().hex[:12]
+    share_id = secrets.token_urlsafe(16)  # 128-bit entropy
     created_at = datetime.now().isoformat()
     conn = get_db()
     if album_id:
