@@ -1,2 +1,2 @@
-# 原 backend/chat_tools.py
-from ..chat_tools import *
+# Re-export from original location for compatibility
+from backend.chat_tools import *

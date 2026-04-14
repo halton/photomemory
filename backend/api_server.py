@@ -5,9 +5,14 @@ PhotoMemory - Phase 3: API Server
 """
 
 import os
+import sys
 import io
 import json
 import sqlite3
+
+# Ensure project root is on sys.path for 'backend.*' imports
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
 
 def set_sqlite_pragmas(conn):
     """
@@ -47,19 +52,9 @@ from backend.cache_util import cached
 pillow_heif.register_heif_opener()
 from PIL import Image
 
-# ── Device Pairing 认证（类 OpenClaw 方案）─────────────────
-#
-# 流程:
-#   1. 客户端 POST /api/pair/request {device_id, device_name}
-#   2. 服务端存入 pending，管理员调 POST /api/pair/approve 审批
-#   3. 审批后颁发绑定 device_id 的 token
-#   4. 后续请求 Header: Authorization: Bearer <token>
-#                        X-Device-ID: <device_id>
-#      缺任意一个或 device_id 不匹配 → 401
-#
-# 管理员用 ADMIN_TOKEN 调审批/列表/吊销接口。
-# ADMIN_TOKEN 通过 --admin-token 或 PM_ADMIN_TOKEN 环境变量设置。
-# 未设置任何 token 时，本地开放访问。
+# ==== 认证与设备管理提取到 backend/auth ==== #
+from backend.auth.pairing import load_devices, save_devices, get_request_device_id
+from backend.auth.middleware import require_auth, require_admin
 
 ADMIN_TOKEN = None           # 管理员 token（审批设备用）
 PAIRING_ENABLED = False      # 启动时根据 --admin-token 自动开启
@@ -74,89 +69,11 @@ _face_scan_state = {"running": False, "total": 0, "processed": 0, "error": None}
 # 设备存储（生产可换 JSON 文件持久化；这里内存+文件双写）
 _DEVICES_FILE: Path = None   # 初始化时设置
 
-def _load_devices() -> dict:
-    if _DEVICES_FILE and _DEVICES_FILE.exists():
-        try:
-            return json.loads(_DEVICES_FILE.read_text())
-        except Exception:
-            pass
-    return {"paired": {}, "pending": {}}
-
-def _save_devices(data: dict):
-    if _DEVICES_FILE:
-        _DEVICES_FILE.write_text(json.dumps(data, indent=2, default=str))
-
 # 内存缓存（启动时从文件加载）
 _devices: dict = {"paired": {}, "pending": {}}
 
 # Session cookie → device_id 映射（内存，重启失效）
 _sessions = {}   # session_id → (device_id, expiry)
-
-
-def _get_request_device_id():
-    return (request.headers.get("X-Device-ID") or
-            request.args.get("device_id") or
-            request.cookies.get("pm_device_id"))
-
-def _check_auth():
-    """验证请求。返回 (ok, device_id|'open')"""
-    if not PAIRING_ENABLED:
-        return True, "open"
-
-    # localhost 直接放行，但只在没有反向代理转发头的情况下
-    # Cloudflare Tunnel 把公网请求转发到 127.0.0.1，需要排除
-    remote = request.remote_addr or ""
-    is_local = remote in ("127.0.0.1", "::1", "localhost")
-    # 如果有 CF-Connecting-IP 或 X-Forwarded-For，说明是通过代理来的公网请求
-    cf_ip = request.headers.get("Cf-Connecting-Ip", "")
-    x_forwarded = request.headers.get("X-Forwarded-For", "")
-    is_proxied = bool(cf_ip or x_forwarded)
-    if is_local and not is_proxied:
-        return True, "localhost"
-
-    # 1. Bearer token + device_id（优先，API / 原生客户端 / 浏览器）
-    auth = request.headers.get("Authorization", "")
-    device_id = request.headers.get("X-Device-ID", "") or request.args.get("device_id", "")
-    if auth.startswith("Bearer ") and device_id:
-        token = auth[7:]
-        paired = _devices["paired"].get(device_id)
-        if paired and paired.get("status") == "active":
-            if secrets.compare_digest(token, paired["token"]):
-                return True, device_id
-
-    # 2. URL query 参数 token + device_id（<img src> 等无法带 header 的场景）
-    url_token = request.args.get("_t", "")
-    url_did   = request.args.get("_d", "")
-    if url_token and url_did:
-        paired = _devices["paired"].get(url_did)
-        if paired and paired.get("status") == "active":
-            if secrets.compare_digest(url_token, paired["token"]):
-                return True, url_did
-
-    return False, ""
-
-def require_auth(f):
-    from functools import wraps
-    @wraps(f)
-    def wrapper(*args, **kwargs):
-        ok, _ = _check_auth()
-        if not ok:
-            return jsonify({"error": "Unauthorized", "code": 401}), 401
-        return f(*args, **kwargs)
-    return wrapper
-
-def require_admin(f):
-    from functools import wraps
-    @wraps(f)
-    def wrapper(*args, **kwargs):
-        if not ADMIN_TOKEN:
-            return jsonify({"error": "Admin not configured"}), 403
-        auth = request.headers.get("Authorization", "")
-        token = auth[7:] if auth.startswith("Bearer ") else ""
-        if not token or not secrets.compare_digest(token, ADMIN_TOKEN):
-            return jsonify({"error": "Forbidden"}), 403
-        return f(*args, **kwargs)
-    return wrapper
 
 
 # 中文地名别名映射（英文存储，支持中文搜索）
@@ -238,7 +155,8 @@ def pair_request():
         "requested_at": datetime.now().isoformat(),
         "ip": request.remote_addr,
     }
-    _save_devices(_devices)
+    from backend.auth.pairing import save_devices
+    save_devices(_DEVICES_FILE, _devices)
     print(f"[Pairing] 新设备申请: {device_name} ({device_id}) from {request.remote_addr}")
     print(f"[Pairing] 审批命令: curl -X POST http://localhost:8765/api/pair/approve "
           f"-H 'Authorization: Bearer <admin_token>' -d '{{\"device_id\":\"{device_id}\"}}'")
@@ -248,7 +166,8 @@ def pair_request():
 @app.route("/api/pair/status", methods=["GET"])
 def pair_status():
     """客户端轮询自己的配对状态"""
-    device_id = _get_request_device_id()
+    from backend.auth.pairing import get_request_device_id
+    device_id = get_request_device_id()
     if not device_id:
         return jsonify({"error": "device_id required"}), 400
     if not PAIRING_ENABLED:
@@ -285,7 +204,8 @@ def pair_approve():
         "approved_at": datetime.now().isoformat(),
         "token_delivered": False,
     }
-    _save_devices(_devices)
+    from backend.auth.pairing import save_devices
+    save_devices(_DEVICES_FILE, _devices)
     print(f"[Pairing] ✅ 已批准: {pending['device_name']} ({device_id})")
     return jsonify({"ok": True, "device_id": device_id, "device_name": pending["device_name"]})
 
@@ -298,7 +218,7 @@ def pair_revoke():
     device_id = data.get("device_id", "").strip()
     if device_id in _devices["paired"]:
         _devices["paired"][device_id]["status"] = "revoked"
-        _save_devices(_devices)
+        save_devices(_DEVICES_FILE, _devices)
         return jsonify({"ok": True})
     return jsonify({"error": "device not found"}), 404
 
@@ -382,7 +302,8 @@ def admin_page():
 
 @app.route("/api/auth_check")
 def auth_check():
-    ok, device_id = _check_auth()
+    from backend.auth.middleware import check_auth
+    ok, device_id = check_auth()
     if not PAIRING_ENABLED:
         return jsonify({"authenticated": True, "mode": "open"})
     if ok:
@@ -416,7 +337,7 @@ def pair_reject():
     device_id = data.get("device_id", "").strip()
     if device_id in _devices["pending"]:
         _devices["pending"].pop(device_id)
-        _save_devices(_devices)
+        save_devices(_DEVICES_FILE, _devices)
         return jsonify({"ok": True})
     return jsonify({"error": "device not found in pending"}), 404
 
@@ -1640,7 +1561,8 @@ if __name__ == "__main__":
     # 设备持久化文件（与 DB 同目录）
     _DEVICES_FILE = Path(DB_PATH).parent / "photomemory_devices.json"
     globals()['_DEVICES_FILE'] = _DEVICES_FILE
-    _devices.update(_load_devices())
+    from backend.auth.pairing import load_devices
+    _devices.update(load_devices(_DEVICES_FILE))
 
     print(f"🚀 PhotoMemory API 启动")
     print(f"   DB    : {DB_PATH}")

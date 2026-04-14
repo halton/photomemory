@@ -1,2 +1,2 @@
-# 原 backend/cache_util.py
-from ..cache_util import *
+# Re-export from original location for compatibility
+from backend.cache_util import *
