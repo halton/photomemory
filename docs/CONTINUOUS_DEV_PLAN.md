@@ -18,7 +18,7 @@
 ### Sprint 1: 性能急救 🔥
 **预计耗时：1-2个 Claude Code session**
 - [x] SQLite WAL 模式 + `PRAGMA` 优化 ✅ 2026-04-14 09:50 — 新增 db_util.py，api_server + 所有脚本统一应用 WAL/NORMAL/cache/mmap ✅ (2026-04-14 09:52)
-- [ ] 添加关键索引（taken_at, gps_city, person_id, photo_id）
+- [x] 添加关键索引（taken_at, gps_city, person_id, photo_id） ✅ (2026-04-14 09:55)
 - [ ] 统计接口内存缓存（60s TTL）
 - [ ] 验收：API 响应时间对比
 
