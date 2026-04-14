@@ -609,6 +609,7 @@ def search():
     return jsonify({"results": results, "total": total, "limit": limit, "offset": offset})
 
 
+# 2026/04/14: 可进一步服务化到 geocode.py (暂保留)
 def _is_person_query(q: str, c) -> bool:
     """判断查询词是否命中已知人名"""
     row = c.execute("SELECT id FROM persons WHERE name LIKE ?", (f"%{q}%",)).fetchone()
