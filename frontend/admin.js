@@ -1,78 +1,6 @@
-<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>PhotoMemory 管理</title>
-<link rel="stylesheet" href="admin.css">
-<!-- 样式已从内联 <style> 拆分为独立文件 admin.css -->
-</head>
-<body>
+// PhotoMemory 管理后台脚本
+// 从 admin.html 拆分
 
-<header>
-  <h1>Photo<span>Memory</span> <span style="color:#666;font-weight:400">管理</span></h1>
-  <span class="badge" id="connBadge">未连接</span>
-  <a href="/" style="margin-left:auto;font-size:13px;color:#666;text-decoration:none">← 返回主页</a>
-</header>
-
-<div class="connect-bar">
-  <input type="password" id="adminTokenInput" placeholder="输入 Admin Token..."
-         onkeydown="if(event.key==='Enter') connect()" />
-  <button class="btn" onclick="connect()">连接</button>
-  <span class="error" id="connectError"></span>
-</div>
-
-<div class="content">
-
-  <div class="section">
-    <div class="section-header">
-      <span class="section-title">⏳ 待审批</span>
-      <span class="section-count" id="pendingCount">0</span>
-      <span class="section-refresh" id="refreshNote"></span>
-    </div>
-    <table>
-      <thead>
-        <tr>
-          <th>设备名</th>
-          <th>Device ID</th>
-          <th>申请时间</th>
-          <th>IP</th>
-          <th>操作</th>
-        </tr>
-      </thead>
-      <tbody id="pendingBody">
-        <tr class="empty-row"><td colspan="5">请先连接</td></tr>
-      </tbody>
-    </table>
-  </div>
-
-  <div class="section">
-    <div class="section-header">
-      <span class="section-title">✅ 已配对设备</span>
-      <span class="section-count" id="pairedCount">0</span>
-    </div>
-    <table>
-      <thead>
-        <tr>
-          <th>设备名</th>
-          <th>Device ID</th>
-          <th>配对时间</th>
-          <th>状态</th>
-          <th>操作</th>
-        </tr>
-      </thead>
-      <tbody id="pairedBody">
-        <tr class="empty-row"><td colspan="5">请先连接</td></tr>
-      </tbody>
-    </table>
-  </div>
-
-</div>
-
-<div class="toast" id="toast"></div>
-
-<script src="admin.js"></script>
-<!-- JS 已从内联 <script> 拆分为独立文件 admin.js -->
 const API = (location.hostname === 'localhost' || location.hostname === '127.0.0.1')
   ? `${location.protocol}//${location.hostname}:8765/api`
   : `${location.protocol}//${location.host}/api`;
@@ -140,7 +68,7 @@ function renderPending(list) {
       <td><span class="device-name">${esc(d.device_name)}</span></td>
       <td><span class="device-id">${esc(d.device_id)}</span></td>
       <td><span class="date-str">${fmt(d.requested_at)}</span></td>
-      <td><span class="ip-str">${esc(d.ip || '-')}</span></td>
+      <td><span class="ip-str">${esc(d.ip || '-') }</span></td>
       <td style="display:flex;gap:6px">
         <button class="btn approve sm" onclick="approve('${esc(d.device_id)}')">批准</button>
         <button class="btn danger sm" onclick="reject('${esc(d.device_id)}')">拒绝</button>
@@ -187,7 +115,7 @@ async function reject(deviceId) {
     headers: { 'Authorization': `Bearer ${adminToken}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({ device_id: deviceId }),
   });
-  if (r.ok) { showToast('🗑 已拒绝'); loadList(); }
+  if (r.ok) { showToast('🗑️ 已拒绝'); loadList(); }
   else showToast('操作失败: ' + r.status, true);
 }
 
@@ -240,6 +168,3 @@ function fmt(iso) {
     return new Date(iso).toLocaleString('zh-CN', {hour12: false});
   } catch { return iso; }
 }
-</script>
-</body>
-</html>
