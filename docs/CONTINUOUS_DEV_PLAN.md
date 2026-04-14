@@ -33,7 +33,7 @@
 
 ### Sprint 3: Flask → FastAPI 迁移 ⚡
 **预计耗时：2-3个 session**
-- [ ] FastAPI app 初始化 + 依赖注入框架
+- [x] FastAPI app 初始化 + 依赖注入框架 ✅ (2026-04-14 10:28)
 - [ ] aiosqlite 连接池
 - [ ] Pydantic 请求/响应模型
 - [ ] 全部路由迁移为 async
