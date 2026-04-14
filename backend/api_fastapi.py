@@ -75,6 +75,71 @@ async def index():
 async def health():
     return {"status": "ok"}
 
+# 收藏/喜欢 API —— FastAPI/Pydantic 迁移（只实现迁移核心部分）
+from backend.api_models import FavoriteToggleResponse, PhotoInfo, FavoritesResponse
+from typing import List
+
+@app.post("/api/photos/{photo_id}/favorite", response_model=FavoriteToggleResponse)
+async def toggle_favorite(photo_id: int):
+    """
+    收藏或取消收藏图片。用 sqlite3 实现最小功能，生产环境请用异步。
+    """
+    import aiosqlite
+    from datetime import datetime
+    from backend.db.async_connection import get_async_db
+    async with await get_async_db() as conn:
+        cur = await conn.execute("SELECT 1 FROM favorites WHERE photo_id=?", (photo_id,))
+        row = await cur.fetchone()
+        if row:
+            await conn.execute("DELETE FROM favorites WHERE photo_id=?", (photo_id,))
+            await conn.commit()
+            return FavoriteToggleResponse(favorited=False)
+        else:
+            await conn.execute(
+                "INSERT INTO favorites (photo_id, created_at) VALUES (?, ?)",
+                (photo_id, datetime.now().isoformat())
+            )
+            await conn.commit()
+            return FavoriteToggleResponse(favorited=True)
+
+@app.get("/api/favorites", response_model=FavoritesResponse)
+async def get_favorites(limit: int = 50, offset: int = 0):
+    """
+    获取所有收藏的图片（核心结构迁移，仅演示）
+    """
+    import aiosqlite
+    from backend.db.async_connection import get_async_db
+    limit = min(limit, 200)
+    async with await get_async_db() as conn:
+        async with conn.execute(
+            "SELECT f.photo_id, p.* FROM favorites f JOIN photos p ON f.photo_id=p.id "
+            "ORDER BY f.created_at DESC LIMIT ? OFFSET ?", (limit, offset)
+        ) as cursor:
+            fav_rows = await cursor.fetchall()
+        async with conn.execute("SELECT COUNT(*) FROM favorites") as cursor:
+            total = (await cursor.fetchone())[0]
+        results = [
+            PhotoInfo(
+                id=r["id"],
+                path=r["path"],
+                filename=r["filename"],
+                taken_at=r["taken_at"],
+                gps_lat=r["gps_lat"],
+                gps_lon=r["gps_lon"],
+                gps_city=r["gps_city"],
+                width=r["width"],
+                height=r["height"],
+                is_screenshot=bool(r["is_screenshot"]),
+                is_duplicate=bool(r["is_duplicate"]),
+                dir_label=r["dir_label"],
+                size=r["size"],
+                thumb_url=f"/api/thumb/{r['id']}",
+                original_url=f"/api/photo/{r['id']}",
+                is_favorite=True
+            ) for r in fav_rows
+        ]
+        return FavoritesResponse(results=results, total=total, limit=limit, offset=offset)
+
 # TODO: 继续迁移 /api 相关路由和依赖
 
 # CLI 启动（可选）

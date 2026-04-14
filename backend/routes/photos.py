@@ -2,16 +2,15 @@
 photos 相关后端路由模块。
 负责 /api/photos 等图片相关接口
 """
-from flask import Blueprint, jsonify, request, abort, send_file
-from backend.api_server import require_auth
+from fastapi import APIRouter, Depends, Query
+from fastapi.responses import JSONResponse
 from backend.db import get_db
 from backend.cache_util import cached
-import os
-from pathlib import Path
-import io
+from typing import List
 from datetime import datetime
+from backend.schemas.photos import ToggleFavoriteResponse, PhotoItem, FavoritesResponse
 
-photos_bp = Blueprint('photos', __name__)
+router = APIRouter()
 
 @photos_bp.route("/api/photos/<int:photo_id>/favorite", methods=["POST"])
 @require_auth
