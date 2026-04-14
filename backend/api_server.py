@@ -43,6 +43,7 @@ from flask import Flask, jsonify, request, send_file, abort, make_response, redi
 from flask_cors import CORS
 
 import pillow_heif
+from cache_util import cached
 pillow_heif.register_heif_opener()
 from PIL import Image
 
@@ -1010,6 +1011,7 @@ def photo_persons(photo_id):
 
 @app.route("/api/stats/timeline", methods=["GET"])
 @require_auth
+@cached(ttl=60)
 def stats_timeline():
     """返回按月统计的照片数量"""
     try:
@@ -1030,6 +1032,7 @@ def stats_timeline():
 
 @app.route("/api/stats/persons", methods=["GET"])
 @require_auth
+@cached(ttl=60)
 def stats_persons():
     """返回人物照片数量排行"""
     try:
@@ -1097,8 +1100,10 @@ def photos_random():
         return jsonify({"error": str(e)}), 500
 
 
-@app.route("/api/stats")
+@app.route("/api/stats", methods=["GET"])
 @require_auth
+@cached(ttl=60)
+@cached(ttl=60)
 def stats():
     conn = get_db()
     c = conn.cursor()
@@ -1159,6 +1164,7 @@ def photos_map():
 
 @app.route("/api/stats/locations", methods=["GET"])
 @require_auth
+@cached(ttl=60)
 def stats_locations():
     """按城市分组统计"""
     conn = get_db()
