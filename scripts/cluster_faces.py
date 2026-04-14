@@ -11,7 +11,8 @@ except ImportError:
 
 DB_PATH = '/tmp/photomemory.db'
 
-conn = sqlite3.connect(DB_PATH)
+from backend.db_util import get_optimized_connection
+conn = get_optimized_connection(DB_PATH)
 c = conn.cursor()
 
 # 1. 读取所有 faces 的 embedding

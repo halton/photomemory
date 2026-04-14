@@ -8,6 +8,28 @@ import os
 import io
 import json
 import sqlite3
+
+def set_sqlite_pragmas(conn):
+    """
+    性能优化：统一设置 WAL 模式及核心参数。
+    可重复调用，无副作用。
+    """
+    c = conn.cursor()
+    try:
+        # WAL模式，允许高并发读写
+        c.execute('PRAGMA journal_mode=WAL;')
+        # NORMAL同步模式，大幅降低写入延迟，WAL模式安全性适中
+        c.execute('PRAGMA synchronous=NORMAL;')
+        # 中间结果存在内存临时表
+        c.execute('PRAGMA temp_store=MEMORY;')
+        # 提高页面缓存，单位为page，负值代表 KB
+        c.execute('PRAGMA cache_size=-20000;')  # ~20MB
+        # 启用256MB mmap（物理内存足够时提升查询/遍历性能）
+        c.execute('PRAGMA mmap_size=268435456;')
+    except Exception as e:
+        # PRAGMA 调用失败时忽略，不影响主流程
+        pass
+
 import argparse
 import subprocess
 import tempfile
@@ -406,6 +428,7 @@ IMAGE_EXTS = {'.jpg', '.jpeg', '.png', '.heic', '.heif', '.bmp', '.tiff', '.gif'
 def _ensure_tables():
     """在启动时确保必要的表存在（Phase 2 可能还没跑）"""
     conn = sqlite3.connect(DB_PATH)
+    set_sqlite_pragmas(conn)
     conn.executescript("""
         CREATE TABLE IF NOT EXISTS faces (
             id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -468,6 +491,7 @@ def _ensure_tables():
 
 def get_db():
     conn = sqlite3.connect(DB_PATH)
+    set_sqlite_pragmas(conn)
     conn.row_factory = sqlite3.Row
     return conn
 

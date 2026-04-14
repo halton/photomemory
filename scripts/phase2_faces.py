@@ -21,6 +21,7 @@ except ImportError:
 import json
 import argparse
 import sqlite3
+from backend.db_util import get_optimized_connection
 import numpy as np
 from pathlib import Path
 from datetime import datetime
@@ -91,7 +92,7 @@ def load_face_app():
 
 
 def detect_faces(db_path: str, limit=None):
-    conn = sqlite3.connect(db_path)
+    conn = get_optimized_connection(db_path)
     init_face_tables(conn)
     c = conn.cursor()
 
@@ -134,13 +135,13 @@ def detect_faces(db_path: str, limit=None):
             continue
 
         for face in faces:
-            if face.det_score < 0.85:
+            if face.det_score < 0.5:
                 continue
             # 人脸区域最小尺寸限制
             bbox = face.bbox.tolist()
             face_w = bbox[2] - bbox[0]
             face_h = bbox[3] - bbox[1]
-            if face_w < 50 or face_h < 50:
+            if face_w < 30 or face_h < 30:
                 continue
 
             bbox = face.bbox.tolist()
@@ -157,7 +158,7 @@ def detect_faces(db_path: str, limit=None):
             # 人脸区域最小尺寸过滤（太小的检测不可靠）
             face_w = bbox[2] - bbox[0]
             face_h = bbox[3] - bbox[1]
-            if face_w < 50 or face_h < 50:
+            if face_w < 30 or face_h < 30:
                 continue
             embedding = face.embedding.astype(np.float32).tobytes()
             landmark = face.kps.tolist() if face.kps is not None else None
@@ -191,7 +192,7 @@ def cluster_faces(db_path: str, eps=0.5, min_samples=2):
     eps: 余弦距离阈值（越小越严格，0.3-0.5 合适）
     min_samples: 同一人至少出现几次才独立成一个 person
     """
-    conn = sqlite3.connect(db_path)
+    conn = get_optimized_connection(db_path)
     init_face_tables(conn)
     c = conn.cursor()
 
@@ -293,7 +294,7 @@ def label_persons(db_path: str, output_dir="/tmp/photomemory_faces"):
     """
     打印每个未命名人物的代表图片路径，让用户输入名字。
     """
-    conn = sqlite3.connect(db_path)
+    conn = get_optimized_connection(db_path)
     c = conn.cursor()
 
     os.makedirs(output_dir, exist_ok=True)
@@ -357,7 +358,7 @@ def label_persons(db_path: str, output_dir="/tmp/photomemory_faces"):
 # ── 统计 ──────────────────────────────────────────────────
 
 def print_stats(db_path: str):
-    conn = sqlite3.connect(db_path)
+    conn = get_optimized_connection(db_path)
     c = conn.cursor()
 
     total_faces = c.execute("SELECT COUNT(*) FROM faces").fetchone()[0]

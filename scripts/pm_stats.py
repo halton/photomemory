@@ -62,7 +62,8 @@ def main():
     if not os.path.isfile(db_path):
         print(f"未找到数据库文件: {db_path}")
         sys.exit(1)
-    conn = sqlite3.connect(db_path)
+    from backend.db_util import get_optimized_connection
+    conn = get_optimized_connection(db_path)
     counts = get_counts(conn)
     if args.json:
         print(json.dumps(counts, ensure_ascii=False, indent=2))

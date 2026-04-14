@@ -2,7 +2,7 @@
 # PhotoMemory 一键启动
 # 用法: ./start.sh [--db 路径] [--skip-tunnel]
 
-DB="/tmp/photomemory_test.db"
+DB="/Users/huohaitao/.openclaw/workspace-daddy/projects/photomemory/data/photomemory.db"
 SKIP_TUNNEL=0
 PORT=8765
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -40,7 +40,7 @@ echo ""
 pkill -f "api_server.py" 2>/dev/null
 
 # 启动 API + 前端
-python3 "$SCRIPT_DIR/backend/api_server.py" --db "$DB" --port $PORT &
+python3 "$SCRIPT_DIR/backend/api_server.py" --db "$DB" --port $PORT --admin-token "1VsnIeo2KbxpDcSMKSo501WAlxjJyEaAXtsLxwLqCGU" &
 API_PID=$!
 
 sleep 1.5

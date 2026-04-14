@@ -9,6 +9,21 @@ import sys
 import hashlib
 import argparse
 import sqlite3
+
+def set_sqlite_pragmas(conn):
+    """
+    性能优化：统一设置 WAL 模式及核心参数。无副作用。
+    """
+    c = conn.cursor()
+    try:
+        c.execute('PRAGMA journal_mode=WAL;')
+        c.execute('PRAGMA synchronous=NORMAL;')
+        c.execute('PRAGMA temp_store=MEMORY;')
+        c.execute('PRAGMA cache_size=-20000;')
+        c.execute('PRAGMA mmap_size=268435456;')
+    except Exception:
+        pass
+
 import json
 from pathlib import Path
 from datetime import datetime
@@ -45,6 +60,7 @@ SCREENSHOT_RESOLUTIONS = {
 
 def init_db(db_path: str) -> sqlite3.Connection:
     conn = sqlite3.connect(db_path)
+    set_sqlite_pragmas(conn)
     c = conn.cursor()
     c.executescript("""
         CREATE TABLE IF NOT EXISTS photos (

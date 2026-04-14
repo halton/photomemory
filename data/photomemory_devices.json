@@ -1,1 +1,34 @@
-{"paired":{},"pending":{}}
+{
+  "paired": {
+    "web-a27b3ebe-8b02-4ff9-a527-4e55b46216ed": {
+      "device_id": "web-a27b3ebe-8b02-4ff9-a527-4e55b46216ed",
+      "device_name": "halton's mbp",
+      "requested_at": "2026-04-13T10:57:42.996949",
+      "ip": "127.0.0.1",
+      "token": "KiJ2PJluHYDSkj1E2nLawphr4Eyfs_XW4US_ALdOqDk",
+      "status": "active",
+      "approved_at": "2026-04-13T10:57:50.854584"
+    },
+    "iphone-halton-66940dbd": {
+      "device_id": "iphone-halton-66940dbd",
+      "device_name": "Halton iPhone",
+      "ip": "127.0.0.1",
+      "requested_at": "2026-04-13T15:18:17.120962",
+      "approved_at": "2026-04-13T15:18:17.120975",
+      "status": "active",
+      "token_delivered": false,
+      "token": "kMhUBa7_a_Y5X0MgljWOuH8o6Q03hTpzGCUy2AG6fB0"
+    },
+    "web-5d109ac9-ef80-4250-9cf9-8943aabe7782": {
+      "device_id": "web-5d109ac9-ef80-4250-9cf9-8943aabe7782",
+      "device_name": "halton's mac",
+      "requested_at": "2026-04-13T17:34:21.320319",
+      "ip": "127.0.0.1",
+      "token": "xrk85g99oHKe-YzNnstfJl5is6ZIPQ7tjWqrbd_lB-E",
+      "status": "active",
+      "approved_at": "2026-04-13T17:35:54.862447",
+      "token_delivered": false
+    }
+  },
+  "pending": {}
+}

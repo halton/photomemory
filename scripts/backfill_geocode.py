@@ -17,7 +17,8 @@ def update_gps_city(db_path, dry_run=False):
     if not os.path.isfile(db_path):
         print(f"未找到数据库文件: {db_path}")
         sys.exit(1)
-    conn = sqlite3.connect(db_path)
+    from backend.db_util import get_optimized_connection
+    conn = get_optimized_connection(db_path)
     c = conn.cursor()
 
     # 只处理gps_lat/lon非空且gps_city为空的记录
