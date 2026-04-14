@@ -89,9 +89,25 @@ def index():
 
 # ── Pairing 接口 ──────────────────────────────────────────
 
+# 简单内存速率限制：每 IP 每分钟允许最大配对请求次数
+_pair_req_rate = {}
+PAIR_REQ_RATE_LIMIT = 10  # 每 IP 每分钟最大尝试数
+PAIR_REQ_RATE_WINDOW = 60  # 秒
+
 @app.route("/api/pair/request", methods=["POST"])
 def pair_request():
-    """设备申请配对（任何人可调，不需认证）"""
+    """设备申请配对（任何人可调，不需认证，速率受限）"""
+    ip = request.remote_addr or '0.0.0.0'
+    now = int(time.time())
+    window = now // PAIR_REQ_RATE_WINDOW
+    key = f"{ip}:{window}"
+    cnt = _pair_req_rate.get(key, 0) + 1
+    _pair_req_rate[key] = cnt
+    # 清理上一个窗口的计数，防止内存泄漏
+    old_key = f"{ip}:{window-1}"
+    if old_key in _pair_req_rate: del _pair_req_rate[old_key]
+    if cnt > PAIR_REQ_RATE_LIMIT:
+        return jsonify({"error": "Too Many Requests", "code": 429, "detail": "请稍后再试，每分钟最多 %d 次配对请求" % PAIR_REQ_RATE_LIMIT}), 429
     data = request.get_json() or {}
     device_id = data.get("device_id", "").strip()
     device_name = data.get("device_name", "Unknown Device").strip()
