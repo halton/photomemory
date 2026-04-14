@@ -13,53 +13,18 @@ import os
 import sys
 
 
-def update_gps_city(db_path, dry_run=False):
-    if not os.path.isfile(db_path):
-        print(f"未找到数据库文件: {db_path}")
-        sys.exit(1)
-    from backend.db_util import get_optimized_connection
-    conn = get_optimized_connection(db_path)
-    c = conn.cursor()
+from backend.services.gps_backfill import backfill_gps_city
 
-    # 只处理gps_lat/lon非空且gps_city为空的记录
-    c.execute("SELECT id, gps_lat, gps_lon FROM photos WHERE gps_lat IS NOT NULL AND gps_lon IS NOT NULL AND (gps_city IS NULL OR gps_city='')")
-    rows = c.fetchall()
-    print(f"待处理照片数: {len(rows)}")
-    updated = 0
-    failed = 0
-    samples = []
-
-    for rid, lat, lon in rows:
-        try:
-            loc = reverse_geocode.search([(lat, lon)])[0]
-            city = loc.get("city", "")
-            admin1 = loc.get("admin1", "")
-            country = loc.get("country", "")
-            # 组合城市名（优先city，有则city+admin1，无city用admin1+country）
-            if city and city != admin1:
-                city_name = f"{city}, {admin1}"
-            elif admin1:
-                city_name = f"{admin1}, {country}"
-            else:
-                city_name = country or "(未知)"
-            city_name = city_name.strip()
-            if not dry_run:
-                c.execute("UPDATE photos SET gps_city = ? WHERE id = ?", (city_name, rid))
-            updated += 1
-            if len(samples) < 5:
-                samples.append({"id": rid, "lat": lat, "lon": lon, "city": city_name})
-        except Exception as e:
-            failed += 1
-            if len(samples) < 5:
-                samples.append({"id": rid, "lat": lat, "lon": lon, "city": "失败", "err": str(e)})
-    if not dry_run:
-        conn.commit()
-
-    print(f"已补全: {updated}，失败: {failed}")
+def update_gps_city(db_path, dry_run=False, limit=1000):
+    """
+    兼容历史脚本参数，用新版后端逻辑自动补全 gps_city。
+    """
+    result = backfill_gps_city(db_path, dry_run=dry_run, limit=limit)
+    print(f"待处理照片数: {result['total']}")
+    print(f"已补全: {result['updated']}，失败: {result['failed']}")
     print("样例:")
-    for item in samples:
+    for item in result['samples']:
         print(item)
-    conn.close()
 
 
 def main():
