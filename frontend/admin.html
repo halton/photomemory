@@ -71,7 +71,7 @@
 
 <div class="toast" id="toast"></div>
 
-<script src="admin.js"></script>
+<script type="module" src="admin.js"></script>
 <!-- JS 已从内联 <script> 拆分为独立文件 admin.js -->
 const API = (location.hostname === 'localhost' || location.hostname === '127.0.0.1')
   ? `${location.protocol}//${location.hostname}:8765/api`

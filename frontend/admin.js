@@ -1,7 +1,11 @@
 // PhotoMemory 管理后台脚本
-// 从 admin.html 拆分
+// 组件化重构 by Claude 2026-04
+// 拆分视图渲染/操作逻辑，便于维护
+import { renderAll, renderPending, renderPaired } from './components_admin_render.js';
+import { approve as approveOp, reject as rejectOp, revoke as revokeOp } from './components_admin_ops.js';
 
-const API = (location.hostname === 'localhost' || location.hostname === '127.0.0.1')
+// 全局 API 变量向后兼容
+window.API = (location.hostname === 'localhost' || location.hostname === '127.0.0.1')
   ? `${location.protocol}//${location.hostname}:8765/api`
   : `${location.protocol}//${location.host}/api`;
 
@@ -51,10 +55,19 @@ async function loadList() {
   }
 }
 
+// 渲染分发，组件形式
 function renderAll(data) {
-  renderPending(data.pending || []);
-  renderPaired(data.paired || []);
+  window._renderHelpers = {
+    showToast, esc, shortId, fmt,
+    approve: window.approve,
+    reject: window.reject,
+    revoke: window.revoke,
+  };
+  renderPending(data.pending || [], window._renderHelpers);
+  renderPaired(data.paired || [], window._renderHelpers);
 }
+// 兼容外部调用
+window.renderAll = renderAll;
 
 function renderPending(list) {
   document.getElementById('pendingCount').textContent = list.length;
@@ -99,36 +112,22 @@ function renderPaired(list) {
   `).join('');
 }
 
+// 操作与 view 彻底解耦
 async function approve(deviceId) {
-  const r = await fetch(`${API}/pair/approve`, {
-    method: 'POST',
-    headers: { 'Authorization': `Bearer ${adminToken}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ device_id: deviceId }),
-  });
-  if (r.ok) { showToast('✅ 已批准'); loadList(); }
-  else showToast('操作失败: ' + r.status, true);
+  await approveOp(deviceId, adminToken, showToast, loadList);
 }
+window.approve = approve; // 兼容 html 调用
+
 
 async function reject(deviceId) {
-  const r = await fetch(`${API}/pair/reject`, {
-    method: 'POST',
-    headers: { 'Authorization': `Bearer ${adminToken}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ device_id: deviceId }),
-  });
-  if (r.ok) { showToast('🗑️ 已拒绝'); loadList(); }
-  else showToast('操作失败: ' + r.status, true);
+  await rejectOp(deviceId, adminToken, showToast, loadList);
 }
+window.reject = reject;
 
 async function revoke(deviceId, name) {
-  if (!confirm(`确认吊销设备「${name}」？`)) return;
-  const r = await fetch(`${API}/pair/revoke`, {
-    method: 'POST',
-    headers: { 'Authorization': `Bearer ${adminToken}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ device_id: deviceId }),
-  });
-  if (r.ok) { showToast('🔒 已吊销'); loadList(); }
-  else showToast('操作失败: ' + r.status, true);
+  await revokeOp(deviceId, name, adminToken, showToast, loadList);
 }
+window.revoke = revoke;
 
 function startAutoRefresh() {
   if (refreshTimer) clearInterval(refreshTimer);
