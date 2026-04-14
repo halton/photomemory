@@ -14,8 +14,7 @@ def get_db():
     conn.row_factory = sqlite3.Row
     return conn
 
-# 已存在的 set_sqlite_pragmas 主要由 get_optimized_connection 封装，但可兼容导出
-from backend.api_server import set_sqlite_pragmas
+from backend.db_util import set_sqlite_pragmas
 
 def close_db(conn):
     conn.close()

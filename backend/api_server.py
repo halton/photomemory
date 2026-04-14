@@ -18,26 +18,7 @@ from backend.db import get_db, set_db_path, close_db, set_sqlite_pragmas
 from backend.db import fetch_one, fetch_all, execute, executescript
 from backend.db import ensure_tables
 
-def set_sqlite_pragmas(conn):  # 向后兼容（被外部调用，实际已在 db_util 优化）
-    """
-    性能优化：统一设置 WAL 模式及核心参数。
-    可重复调用，无副作用。
-    """
-    c = conn.cursor()
-    try:
-        # WAL模式，允许高并发读写
-        c.execute('PRAGMA journal_mode=WAL;')
-        # NORMAL同步模式，大幅降低写入延迟，WAL模式安全性适中
-        c.execute('PRAGMA synchronous=NORMAL;')
-        # 中间结果存在内存临时表
-        c.execute('PRAGMA temp_store=MEMORY;')
-        # 提高页面缓存，单位为page，负值代表 KB
-        c.execute('PRAGMA cache_size=-20000;')  # ~20MB
-        # 启用256MB mmap（物理内存足够时提升查询/遍历性能）
-        c.execute('PRAGMA mmap_size=268435456;')
-    except Exception as e:
-        # PRAGMA 调用失败时忽略，不影响主流程
-        pass
+# set_sqlite_pragmas 已迁移到 backend/db_util.py，通过 backend.db 导出
 
 import argparse
 import subprocess
