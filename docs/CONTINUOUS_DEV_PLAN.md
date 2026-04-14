@@ -27,7 +27,7 @@
 - [x] 建立目标目录结构（routes/services/db/auth/utils） ✅ (2026-04-14 10:04)
 - [x] 提取认证模块 → `auth/pairing.py` + `auth/middleware.py` ✅ (2026-04-14 10:12)
 - [x] 提取路由 → `routes/photos.py`, `routes/persons.py`, `routes/albums.py`, `routes/search.py`, `routes/stats.py`, `routes/admin.py`, `routes/shares.py` ✅ (2026-04-14 10:13)
-- [ ] 提取服务 → `services/thumbnail.py`, `services/geocode.py`
+- [x] 提取服务 → `services/thumbnail.py`, `services/geocode.py` ✅ (2026-04-14 10:19)
 - [ ] 提取数据库层 → `db/connection.py`, `db/queries.py`, `db/migrations.py`
 - [ ] 验收：所有 API 端点功能不变，`api_server.py` 缩减到 <100 行入口
 
