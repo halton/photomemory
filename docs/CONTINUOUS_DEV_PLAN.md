@@ -25,7 +25,7 @@
 ### Sprint 2: 后端模块化拆分 🏗️
 **预计耗时：2-3个 session**
 - [x] 建立目标目录结构（routes/services/db/auth/utils） ✅ (2026-04-14 10:04)
-- [ ] 提取认证模块 → `auth/pairing.py` + `auth/middleware.py`
+- [x] 提取认证模块 → `auth/pairing.py` + `auth/middleware.py` ✅ (2026-04-14 10:12)
 - [ ] 提取路由 → `routes/photos.py`, `routes/persons.py`, `routes/albums.py`, `routes/search.py`, `routes/stats.py`, `routes/admin.py`, `routes/shares.py`
 - [ ] 提取服务 → `services/thumbnail.py`, `services/geocode.py`
 - [ ] 提取数据库层 → `db/connection.py`, `db/queries.py`, `db/migrations.py`
