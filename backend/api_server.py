@@ -43,7 +43,7 @@ from flask import Flask, jsonify, request, send_file, abort, make_response, redi
 from flask_cors import CORS
 
 import pillow_heif
-from cache_util import cached
+from backend.cache_util import cached
 pillow_heif.register_heif_opener()
 from PIL import Image
 
