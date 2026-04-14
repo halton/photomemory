@@ -1,0 +1,20 @@
+version: '3.9'
+
+services:
+  photomemory:
+    build: .
+    image: photomemory:latest
+    container_name: photomemory
+    restart: unless-stopped
+    environment:
+      - PM_DB=/photomemory_data/photomemory.db
+    ports:
+      - "8765:8765"
+    volumes:
+      - photomemory_data:/photomemory_data
+    # 默认用 --skip-tunnel，避免 cloudflare tunnel 报错
+    command: ["/bin/bash", "./start.sh", "--db", "/photomemory_data/photomemory.db", "--skip-tunnel"]
+
+volumes:
+  photomemory_data:
+    driver: local

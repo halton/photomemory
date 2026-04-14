@@ -8,6 +8,7 @@ import os
 import sys
 import io
 import json
+import time
 # import sqlite3 不再直接使用，由 backend.db.connection 负责
 
 # Ensure project root is on sys.path for 'backend.*' imports
@@ -385,7 +386,7 @@ def get_favorites():
             "height": r["height"],
             "is_screenshot": bool(r["is_screenshot"]),
             "is_duplicate": bool(r["is_duplicate"]),
-            "dir_label": r["dir_label"],
+            "dir_label": r["directory"],
             "size": r["size"],
             "thumb_url": f"/api/thumb/{r['id']}",
             "original_url": f"/api/photo/{r['id']}",
@@ -489,7 +490,7 @@ def search():
         # 构建多词 OR 条件
         term_conditions = []
         for term in search_terms:
-            term_conditions.append("(p.gps_city LIKE ? OR p.filename LIKE ? OR p.dir_label LIKE ?)")
+            term_conditions.append("(p.gps_city LIKE ? OR p.filename LIKE ? OR p.directory LIKE ?)")
             params.extend([f"%{term}%", f"%{term}%", f"%{term}%"])
         conditions.append("(" + " OR ".join(term_conditions) + ")")
 
@@ -498,7 +499,7 @@ def search():
         SELECT p.id, p.path, p.filename, p.taken_at,
                p.gps_lat, p.gps_lon, p.gps_city,
                p.width, p.height, p.is_screenshot, p.is_duplicate,
-               p.dir_label, p.size
+               p.directory, p.size
         FROM photos p
         {where}
         ORDER BY p.taken_at DESC
@@ -534,7 +535,7 @@ def search():
             "height": r["height"],
             "is_screenshot": bool(r["is_screenshot"]),
             "is_duplicate": bool(r["is_duplicate"]),
-            "dir_label": r["dir_label"],
+            "dir_label": r["directory"],
             "thumb_url": f"/api/thumb/{r['id']}",
             "original_url": f"/api/photo/{r['id']}",
             "is_favorite": r["id"] in fav_set
@@ -906,7 +907,7 @@ def photos_random():
             SELECT p.id, p.path, p.filename, p.taken_at,
                    p.gps_lat, p.gps_lon, p.gps_city,
                    p.width, p.height, p.is_screenshot, p.is_duplicate,
-                   p.dir_label, p.size
+                   p.directory, p.size
             FROM photos p
             ORDER BY RANDOM()
             LIMIT ?
@@ -926,7 +927,7 @@ def photos_random():
                 "height": r["height"],
                 "is_screenshot": bool(r["is_screenshot"]),
                 "is_duplicate": bool(r["is_duplicate"]),
-                "dir_label": r["dir_label"],
+                "dir_label": r["directory"],
                 "thumb_url": f"/api/thumb/{r['id']}",
                 "original_url": f"/api/photo/{r['id']}"
             })
@@ -1084,7 +1085,7 @@ def duplicates():
 @require_auth
 def list_directories():
     conn = get_db()
-    rows = conn.execute("SELECT * FROM directories ORDER BY added_at DESC").fetchall()
+    rows = conn.execute("SELECT * FROM directories ORDER BY last_scan DESC").fetchall()
     conn.close()
     return jsonify({"directories": [dict(r) for r in rows]})
 
@@ -1202,6 +1203,21 @@ def health():
 
 
 # ── 主入口 ────────────────────────────────────────────────
+
+def create_app(config=None):
+    """测试用，返回 Flask app 实例。可接受 {'TESTING':True, 'DATABASE':...} 配置"""
+    global DB_PATH, PAIRING_ENABLED, ADMIN_TOKEN
+    app_conf = config or {}
+    test_db = app_conf.get('DATABASE')
+    ADMIN_TOKEN = app_conf.get('ADMIN_TOKEN', None)
+    PAIRING_ENABLED = bool(ADMIN_TOKEN)
+    if test_db:
+        DB_PATH = test_db
+        set_db_path(test_db)
+    app.config.update(app_conf)
+    # 在测试入口需重新绑定依赖/变量等
+    return app
+
 
 # 相册API
 

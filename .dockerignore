@@ -1,0 +1,21 @@
+# 忽略不应打包进 Docker 镜像的文件
+.git
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.db
+data/
+*.sqlite
+*.log
+.idea/
+.vscode/
+*.env
+*.DS_Store
+node_modules/
+frontend/
+venv/
+.envrc
+*.bak
+
+# 也可根据实际情况增删其它开发/临时目录
