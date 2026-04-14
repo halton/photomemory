@@ -70,6 +70,62 @@ async def index():
     }
     return FileResponse(frontend_index, headers=headers)
 
+# ==== 静态文件与特殊 HTML 路由实现 ====
+from fastapi import HTTPException
+from fastapi.responses import Response
+
+
+def get_admin_token():
+    """从环境变量或命令行参数读取 admin token（兼容 Flask 行为）"""
+    token = os.environ.get("ADMIN_TOKEN")
+    # 补充参数注入：可用 argparse 或全局变量，如果有迁移可以进一步完善
+    return token
+
+@app.get("/admin")
+async def admin_page(request: Request):
+    """管理界面：须 admin token，兼容 /admin?token=xxx && Authorization header"""
+    token = request.query_params.get("token") or \
+            request.headers.get("Authorization", "").removeprefix("Bearer ").strip()
+    admin_token = get_admin_token()
+    pairing_enabled = True if admin_token else False
+    # 保持向后兼容：未设 token 时允许访问
+    if pairing_enabled and (not token or not secrets.compare_digest(token, admin_token)):
+        html = '''<!DOCTYPE html><html><body style="background:#0f0f0f;color:#666;display:flex;align-items:center;justify-content:center;height:100vh;font-family:monospace;flex-direction:column"><div style="font-size:48px">🔒</div><div style="margin:16px 0;color:#fff">需要管理员权限</div><div style="font-size:13px">访问 /admin?token=YOUR_ADMIN_TOKEN</div></body></html>'''
+        return Response(content=html, media_type="text/html", status_code=403)
+    admin_path = Path(FRONTEND_DIR) / "admin.html"
+    if not admin_path.is_file():
+        raise HTTPException(status_code=404, detail="admin.html not found")
+    return FileResponse(admin_path)
+
+@app.get("/auto-login/{device_id}/{token}")
+async def auto_login(device_id: str, token: str):
+    """自动登录：把 device_id 和 token 注入 localStorage，然后跳首页"""
+    # 验证逻辑略——如需校验可接入 DB
+    html = f"""
+    <!DOCTYPE html><html><head><meta charset='utf-8'><title>PhotoMemory</title></head>
+    <body style='background:#111;color:#eee;font-family:sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;flex-direction:column;gap:16px'>
+    <div style='font-size:48px'>📸</div><h2>正在登录...</h2>
+    <script>
+    localStorage.setItem('pm_device_id','{device_id}');
+    localStorage.setItem('pm_token','{token}');
+    setTimeout(()=>{{window.location.href='/';}},500);
+    </script></body></html>"""
+    return Response(content=html, media_type="text/html")
+
+@app.get("/reset-auth")
+async def reset_auth_page():
+    """清除 localStorage/cookie 中的配对凭证，强制重新配对"""
+    html = """
+    <!DOCTYPE html><html><head><meta charset='utf-8'><title>Reset Auth - PhotoMemory</title>
+    <style>body{background:#111;color:#eee;font-family:sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;}</style></head><body><div style='text-align:center'>
+    <div style='font-size:48px'>🔄</div><h2>正在清除凭证...</h2><p style='color:#888'>清除后自动跳转到配对页面</p></div>
+    <script>['pm_device_id','pm_token'].forEach(k=>{localStorage.removeItem(k);document.cookie=k+'=;expires=Thu, 01 Jan 1970 00:00:00 GMT;path=/';});setTimeout(()=>{window.location.href='/';},1000);</script></body></html>
+    """
+    return Response(content=html, media_type="text/html")
+
+from fastapi.staticfiles import StaticFiles
+app.mount("", StaticFiles(directory=FRONTEND_DIR, html=True), name="static")
+
 # 以下 API 路由只做示意, 实际路由可逐步迁移
 @app.get("/api/health")
 async def health():
