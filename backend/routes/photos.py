@@ -3,7 +3,8 @@ photos 相关后端路由模块。
 负责 /api/photos 等图片相关接口
 """
 from flask import Blueprint, jsonify, request, abort, send_file
-from backend.api_server import require_auth, get_db
+from backend.api_server import require_auth
+from backend.db import get_db
 from backend.cache_util import cached
 import os
 from pathlib import Path

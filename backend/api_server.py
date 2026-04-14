@@ -8,13 +8,17 @@ import os
 import sys
 import io
 import json
-import sqlite3
+# import sqlite3 不再直接使用，由 backend.db.connection 负责
 
 # Ensure project root is on sys.path for 'backend.*' imports
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 
-def set_sqlite_pragmas(conn):
+from backend.db import get_db, set_db_path, close_db, set_sqlite_pragmas
+from backend.db import fetch_one, fetch_all, execute, executescript
+from backend.db import ensure_tables
+
+def set_sqlite_pragmas(conn):  # 向后兼容（被外部调用，实际已在 db_util 优化）
     """
     性能优化：统一设置 WAL 模式及核心参数。
     可重复调用，无副作用。
@@ -322,13 +326,15 @@ def pair_reject():
         return jsonify({"ok": True})
     return jsonify({"error": "device not found in pending"}), 404
 
+# DB_PATH 由 backend.db.connection 管理，通过 set_db_path 统一设置
 DB_PATH = None
 
 IMAGE_EXTS = {'.jpg', '.jpeg', '.png', '.heic', '.heif', '.bmp', '.tiff', '.gif', '.webp'}
 
 # ── DB Helper ─────────────────────────────────────────────
 
-def _ensure_tables():
+# def _ensure_tables 已迁移到 backend/db/migrations.py 作为 ensure_tables
+
     """在启动时确保必要的表存在（Phase 2 可能还没跑）"""
     conn = sqlite3.connect(DB_PATH)
     set_sqlite_pragmas(conn)
@@ -393,11 +399,8 @@ def _ensure_tables():
     """)
     conn.close()
 
-def get_db():
-    conn = sqlite3.connect(DB_PATH)
-    set_sqlite_pragmas(conn)
-    conn.row_factory = sqlite3.Row
-    return conn
+# get_db 由 backend.db.connection 导出，参数与行为兼容
+
 
 
 # ── 收藏/喜欢 API ────────────────────────────────────────
@@ -1522,6 +1525,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     DB_PATH = os.path.abspath(args.db)
+    set_db_path(DB_PATH)
     _admin = args.admin_token or None
     _pairing = bool(_admin)
 
@@ -1534,7 +1538,8 @@ if __name__ == "__main__":
     globals()['PAIRING_ENABLED'] = _pairing
     globals()['DB_PATH'] = DB_PATH
 
-    _ensure_tables()
+    ensure_tables()
+
 
     # 设备持久化文件（与 DB 同目录）
     _DEVICES_FILE = Path(DB_PATH).parent / "photomemory_devices.json"
