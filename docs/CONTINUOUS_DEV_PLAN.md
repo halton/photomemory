@@ -29,7 +29,7 @@
 - [x] 提取路由 → `routes/photos.py`, `routes/persons.py`, `routes/albums.py`, `routes/search.py`, `routes/stats.py`, `routes/admin.py`, `routes/shares.py` ✅ (2026-04-14 10:13)
 - [x] 提取服务 → `services/thumbnail.py`, `services/geocode.py` ✅ (2026-04-14 10:19)
 - [x] 提取数据库层 → `db/connection.py`, `db/queries.py`, `db/migrations.py` ✅ (2026-04-14 10:25)
-- [ ] 验收：所有 API 端点功能不变，`api_server.py` 缩减到 <100 行入口
+- [x] 验收：所有 API 端点功能不变，`api_server.py` 缩减到 <100 行入口 ✅ (2026-04-14 10:26)
 
 ### Sprint 3: Flask → FastAPI 迁移 ⚡
 **预计耗时：2-3个 session**
