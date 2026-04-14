@@ -1204,6 +1204,25 @@ def health():
 # ── 主入口 ────────────────────────────────────────────────
 
 # 相册API
+
+@app.route("/api/albums/recommend", methods=["GET"])
+@require_auth
+def recommend_albums_api():
+    """
+    智能推荐相册 API 接口，返回推荐相册列表
+    可接受 top_k 推荐数参数，默认为5
+    """
+    from backend.services import recommend
+    topk = request.args.get("top_k", default=5, type=int)
+    rec_albums = recommend.recommend_albums(top_k=topk)
+    # enrich cover thumb (与 list_albums 保持一致)
+    for album in rec_albums:
+        if album["cover_photo_id"]:
+            album["cover_thumb"] = f"/api/thumb/{album['cover_photo_id']}"
+        else:
+            album["cover_thumb"] = None
+    return jsonify({"albums": rec_albums})
+
 @app.route("/api/albums", methods=["GET"])
 @require_auth
 def list_albums():
