@@ -657,6 +657,8 @@ def original_photo(photo_id):
     if not row:
         abort(404)
     path = row["path"]
+    if not is_safe_path(path):
+        abort(403, description="非法照片路径")
     if not os.path.exists(path):
         abort(404)
     ext = Path(path).suffix.lower()
@@ -1304,6 +1306,31 @@ def delete_album(album_id):
     conn.close()
     return jsonify({"ok": True, "deleted": album_id})
 
+# ── 路径安全检查工具 ──
+def is_safe_path(path, base_dirs=None):
+    """
+    路径遍历防护：确保 path 是允许目录下的绝对路径
+    base_dirs: 允许的目录（列表/单个），默认仅允许 DB_PATH 同目录及其子孙
+    """
+    if not isinstance(path, str): return False
+    try:
+        real = os.path.realpath(path)
+    except Exception:
+        return False
+    if not os.path.isabs(real):
+        return False
+    if base_dirs is None:
+        # 仅允许照片数据库同目录及其子孙
+        parent = os.path.abspath(os.path.dirname(DB_PATH) if 'DB_PATH' in globals() and DB_PATH else '.')
+        base_dirs = [parent]
+    if isinstance(base_dirs, str):
+        base_dirs = [base_dirs]
+    for basedir in base_dirs:
+        abs_dir = os.path.abspath(basedir)
+        if real == abs_dir or real.startswith(abs_dir+os.sep):
+            return True
+    return False
+
 # ── 照片下载/批量下载/分享链接 API ───────────────
 
 from zipfile import ZipFile
@@ -1318,6 +1345,8 @@ def download_photo(photo_id):
     if not row:
         abort(404)
     path, filename = row["path"], row["filename"]
+    if not is_safe_path(path):
+        abort(403, description="非法照片路径")
     if not os.path.exists(path):
         abort(404)
     return send_file(path, as_attachment=True, download_name=filename or f"photo_{photo_id}")
@@ -1343,6 +1372,8 @@ def batch_download_photos():
             if os.path.exists(fp):
                 # zip内路径去掉文件夹名
                 arcname = fname
+                if not is_safe_path(fp):
+                    continue  # 跳过非法路径（路径遍历防护）
                 try:
                     zf.write(fp, arcname)
                 except Exception:
