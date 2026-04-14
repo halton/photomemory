@@ -450,6 +450,7 @@ def _ensure_tables():
             created_at  TEXT,
             updated_at  TEXT
         );
+        CREATE INDEX IF NOT EXISTS idx_persons_id ON persons(id);  # 快速 id 检索
         CREATE TABLE IF NOT EXISTS directories (
             path TEXT PRIMARY KEY,
             label TEXT,

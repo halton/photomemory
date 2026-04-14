@@ -98,8 +98,9 @@ def init_db(db_path: str) -> sqlite3.Connection:
             notified    INTEGER DEFAULT 0
         );
 
-        CREATE INDEX IF NOT EXISTS idx_taken_at  ON photos(taken_at);
-        CREATE INDEX IF NOT EXISTS idx_hash      ON photos(file_hash);
+        CREATE INDEX IF NOT EXISTS idx_taken_at     ON photos(taken_at);
+        CREATE INDEX IF NOT EXISTS idx_gps_city     ON photos(gps_city);
+        CREATE INDEX IF NOT EXISTS idx_hash         ON photos(file_hash);
         CREATE INDEX IF NOT EXISTS idx_is_screenshot ON photos(is_screenshot);
     """)
     conn.commit()
