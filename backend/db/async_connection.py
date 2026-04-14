@@ -86,12 +86,18 @@ async def fetch_one(query: str, params: Optional[Tuple]=None) -> Optional[dict]:
             return _asdict(row)
 
 async def fetch_all(query: str, params: Optional[Tuple]=None) -> List[dict]:
+    """
+    异步获取所有查询结果。每行dict，常用于SELECT列表。
+    """
     async with await get_async_db() as conn:
         async with conn.execute(query, params or ()) as cursor:
             rows = await cursor.fetchall()
             return [dict(row) for row in rows]
 
 async def execute(query: str, params: Optional[Tuple]=None) -> Any:
+    """
+    执行异步写操作（INSERT/UPDATE/DELETE等），返回 lastrowid。
+    """
     async with await get_async_db() as conn:
         async with conn.execute(query, params or ()) as cursor:
             await conn.commit()

@@ -26,20 +26,23 @@ from contextlib import asynccontextmanager
 
 # FastAPI lifespan for managing async DB pool
 @asynccontextmanager
-def _lifespan(app) -> AsyncGenerator[None, None]:
+async def _lifespan(app) -> AsyncGenerator[None, None]:
     import os
     db_path = os.environ.get("PHOTOMEMORY_DB", "./photomemory.db")
     set_async_db_path(db_path)
     set_async_pool_size(5)  # default
-    yield
-    await close_pool()
+    try:
+        yield
+    finally:
+        await close_pool()
+
 
 FRONTEND_DIR = os.path.join(os.path.dirname(__file__), "..", "frontend")
 
 from backend.db.async_connection import set_async_db_path, set_async_pool_size, close_pool
 
 app = FastAPI(
-    lifespan=lambda app: _lifespan(app)
+    lifespan=_lifespan
 )
 app.add_middleware(
     CORSMiddleware,
