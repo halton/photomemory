@@ -76,27 +76,8 @@ _devices: dict = {"paired": {}, "pending": {}}
 _sessions = {}   # session_id → (device_id, expiry)
 
 
-# 中文地名别名映射（英文存储，支持中文搜索）
-CITY_ALIASES = {
-    "北京": ["Beijing", "beijing"],
-    "上海": ["Shanghai", "shanghai"],
-    "广州": ["Guangzhou", "guangzhou"],
-    "深圳": ["Shenzhen", "shenzhen"],
-    "成都": ["Chengdu", "chengdu"],
-    "杭州": ["Hangzhou", "hangzhou"],
-    "武汉": ["Wuhan", "wuhan"],
-    "西安": ["Xi'an", "Xian", "xian"],
-    "南京": ["Nanjing", "nanjing"],
-    "重庆": ["Chongqing", "chongqing"],
-    "天津": ["Tianjin", "tianjin"],
-    "山西": ["Shanxi", "shanxi"],
-    "北京海淀": ["Beijing Haidian", "Haidian"],
-    "北京金融街": ["Beijing Jinrongjie", "Jinrongjie"],
-    "北京景山": ["Beijing Jingshan", "Jingshan"],
-    "江苏": ["Jiangsu", "jiangsu"],
-    "苏州": ["Songling", "Suzhou", "suzhou"],
-    "太原": ["Gutao", "gutao", "Taiyuan"],
-}
+# 地名别名辅助由 services.geocode 提供
+from backend.services.geocode import CITY_ALIASES
 
 VIDEO_EXTS = {'.mov', '.mp4', '.avi', '.mkv', '.m4v', '.3gp'}
 
@@ -639,12 +620,15 @@ def _is_person_query(q: str, c) -> bool:
 @app.route("/api/thumb/<int:photo_id>")
 @require_auth
 def thumbnail(photo_id):
+    """
+    缩略图接口：根据 photo_id 返回图片或视频缩略图。包含本地缓存，兼容原行为。
+    """
+    from backend.services.thumbnail import generate_image_thumbnail, generate_video_thumbnail, placeholder_thumbnail
     conn = get_db()
     row = conn.execute("SELECT path FROM photos WHERE id=?", (photo_id,)).fetchone()
     conn.close()
     if not row:
         abort(404)
-
     path = row["path"]
     if not os.path.exists(path):
         abort(404)
@@ -654,12 +638,16 @@ def thumbnail(photo_id):
 
     # 视频：用 ffmpeg 截取第1秒帧
     if ext in VIDEO_EXTS:
-        return _video_thumbnail(path, size)
+        try:
+            data = generate_video_thumbnail(path, size)
+            return send_file(io.BytesIO(data), mimetype="image/jpeg")
+        except Exception:
+            data = placeholder_thumbnail(size, "🎬")
+            return send_file(io.BytesIO(data), mimetype="image/jpeg")
 
     # 缩略图本地缓存
     cache_dir = Path(DB_PATH).parent / "thumbs"
     cache_dir.mkdir(exist_ok=True)
-    # 缓存文件名： photo_id_size_mtime.jpg
     try:
         mtime = int(os.path.getmtime(path))
     except Exception:
@@ -668,36 +656,25 @@ def thumbnail(photo_id):
     if cache_file.exists():
         return send_file(str(cache_file), mimetype="image/jpeg")
 
-    # 生成缩略图
+    # 生成图片缩略图，异常兜底占位
     try:
-        from PIL import ImageOps
-        img = Image.open(path)
-        # 先处理 EXIF 旋转，再缩略
+        data = generate_image_thumbnail(path, size)
         try:
-            img = ImageOps.exif_transpose(img)
+            cache_file.write_bytes(data)
         except Exception:
             pass
-        if img.mode in ("RGBA", "P", "LA"):
-            img = img.convert("RGB")
-        img.thumbnail((size, size), Image.LANCZOS)
-        buf = io.BytesIO()
-        img.convert("RGB").save(buf, "JPEG", quality=85)
-        buf.seek(0)
-        # 保存到缓存
-        try:
-            cache_file.write_bytes(buf.getvalue())
-        except Exception:
-            pass
-        buf.seek(0)
-        return send_file(buf, mimetype="image/jpeg")
+        return send_file(io.BytesIO(data), mimetype="image/jpeg")
     except Exception as e:
-        import traceback
+        from traceback import print_exc
         print(f"[THUMB ERROR] photo_id={photo_id} path={path} error={e}")
-        traceback.print_exc()
-        abort(500)
+        print_exc()
+        data = placeholder_thumbnail(size)
+        return send_file(io.BytesIO(data), mimetype="image/jpeg")
 
 
-def _video_thumbnail(path: str, size: int):
+
+# 2026/04/14 提取到 backend/services/thumbnail.py
+
     """用 ffmpeg 截取视频第1秒画面作为缩略图"""
     ffmpeg = _find_ffmpeg()
     if not ffmpeg:
