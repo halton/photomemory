@@ -333,73 +333,8 @@ IMAGE_EXTS = {'.jpg', '.jpeg', '.png', '.heic', '.heif', '.bmp', '.tiff', '.gif'
 
 # ── DB Helper ─────────────────────────────────────────────
 
-# def _ensure_tables 已迁移到 backend/db/migrations.py 作为 ensure_tables
-
-    """在启动时确保必要的表存在（Phase 2 可能还没跑）"""
-    conn = sqlite3.connect(DB_PATH)
-    set_sqlite_pragmas(conn)
-    conn.executescript("""
-        CREATE TABLE IF NOT EXISTS faces (
-            id          INTEGER PRIMARY KEY AUTOINCREMENT,
-            photo_id    INTEGER,
-            photo_path  TEXT,
-            bbox        TEXT,
-            landmark    TEXT,
-            det_score   REAL,
-            embedding   BLOB,
-            person_id   INTEGER,
-            detected_at TEXT
-        );
-        CREATE TABLE IF NOT EXISTS persons (
-            id          INTEGER PRIMARY KEY AUTOINCREMENT,
-            name        TEXT,
-            alias       TEXT,
-            embedding_centroid BLOB,
-            face_count  INTEGER DEFAULT 0,
-            created_at  TEXT,
-            updated_at  TEXT
-        );
-        CREATE INDEX IF NOT EXISTS idx_persons_id ON persons(id);  # 快速 id 检索
-        CREATE TABLE IF NOT EXISTS directories (
-            path TEXT PRIMARY KEY,
-            label TEXT,
-            file_count INTEGER DEFAULT 0,
-            last_scan TEXT
-        );
-        CREATE TABLE IF NOT EXISTS duplicate_groups (
-            hash TEXT PRIMARY KEY,
-            paths TEXT,
-            count INTEGER DEFAULT 0
-        );
-        CREATE TABLE IF NOT EXISTS albums (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT NOT NULL,
-            description TEXT,
-            cover_photo_id INTEGER,
-            created_at TEXT,
-            updated_at TEXT
-        );
-        CREATE TABLE IF NOT EXISTS album_photos (
-            album_id INTEGER NOT NULL,
-            photo_id INTEGER NOT NULL,
-            sort_order INTEGER DEFAULT 0,
-            PRIMARY KEY (album_id, photo_id)
-        );
-        CREATE TABLE IF NOT EXISTS shares (
-            id TEXT PRIMARY KEY,
-            album_id INTEGER,
-            photo_ids TEXT,
-            expires_at TEXT,
-            created_at TEXT
-        );
-        CREATE TABLE IF NOT EXISTS favorites (
-            photo_id INTEGER PRIMARY KEY,
-            created_at TEXT
-        );
-    """)
-    conn.close()
-
-# get_db 由 backend.db.connection 导出，参数与行为兼容
+# _ensure_tables 已迁移到 backend/db/migrations.py
+# get_db 由 backend.db.connection 导出
 
 
 
