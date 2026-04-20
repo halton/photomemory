@@ -62,9 +62,53 @@ INIT_SCHEMA = """
     );
 """
 
+# FTS5 全文搜索虚拟表（用于 filename、gps_city、directory 联合搜索）
+FTS_SCHEMA = """
+    CREATE VIRTUAL TABLE IF NOT EXISTS photos_fts USING fts5(
+        filename,
+        gps_city,
+        directory,
+        content='photos',
+        content_rowid='id'
+    );
+"""
+
+# 索引优化
+INDEXES_SCHEMA = """
+    CREATE INDEX IF NOT EXISTS idx_photos_taken_at ON photos(taken_at);
+    CREATE INDEX IF NOT EXISTS idx_photos_gps_city ON photos(gps_city);
+    CREATE INDEX IF NOT EXISTS idx_faces_person_id ON faces(person_id);
+    CREATE INDEX IF NOT EXISTS idx_faces_photo_id ON faces(photo_id);
+    CREATE INDEX IF NOT EXISTS idx_faces_photo_path ON faces(photo_path);
+    CREATE INDEX IF NOT EXISTS idx_album_photos_photo ON album_photos(photo_id);
+"""
+
+
 def ensure_tables():
     conn = get_db()
     conn.executescript(INIT_SCHEMA)
+    # FTS5 — silently skip if photos table doesn't exist yet
+    try:
+        conn.executescript(FTS_SCHEMA)
+    except Exception:
+        pass
+    try:
+        conn.executescript(INDEXES_SCHEMA)
+    except Exception:
+        pass
     conn.close()
 
-# 可后续扩展 migration 体系，现只负责初始建表
+
+def rebuild_fts():
+    """重建 FTS5 索引（全量同步 photos 表内容）"""
+    conn = get_db()
+    try:
+        conn.executescript(FTS_SCHEMA)
+        conn.execute("DELETE FROM photos_fts")
+        conn.execute("""
+            INSERT INTO photos_fts(rowid, filename, gps_city, directory)
+            SELECT id, filename, gps_city, directory FROM photos
+        """)
+        conn.commit()
+    finally:
+        conn.close()

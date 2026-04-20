@@ -70,7 +70,7 @@ _sessions = {}   # session_id → (device_id, expiry)
 
 
 # 地名别名辅助由 services.geocode 提供
-from backend.services.geocode import CITY_ALIASES
+from backend.services.geocode import CITY_ALIASES, expand_search_terms
 
 VIDEO_EXTS = {'.mov', '.mp4', '.avi', '.mkv', '.m4v', '.3gp'}
 
@@ -488,19 +488,9 @@ def search():
         conditions.append(f"p.path IN ({placeholders})")
         params.extend(list(person_photo_paths))
 
-    # 地点文本搜索（GPS城市字段，支持中文别名）
+    # 地点文本搜索（GPS城市字段，支持中文别名 + 拼音）
     if q and not person_name and not _is_person_query(q, c):
-        # 展开中文别名为英文关键词
-        search_terms = [q]
-        for cn, aliases in CITY_ALIASES.items():
-            if q in cn or cn in q:
-                search_terms.extend(aliases)
-            for alias in aliases:
-                if q.lower() in alias.lower():
-                    search_terms.append(cn)
-                    break
-        # 去重
-        search_terms = list(dict.fromkeys(search_terms))
+        search_terms = expand_search_terms(q)
         # 构建多词 OR 条件
         term_conditions = []
         for term in search_terms:
@@ -566,6 +556,47 @@ def _is_person_query(q: str, c) -> bool:
     """判断查询词是否命中已知人名"""
     row = c.execute("SELECT id FROM persons WHERE name LIKE ?", (f"%{q}%",)).fetchone()
     return row is not None
+
+
+@app.route("/api/search/suggest", methods=["GET"])
+@require_auth
+def search_suggest():
+    """搜索建议：根据前缀返回城市/人物/目录提示"""
+    q = request.args.get("q", "").strip()
+    if len(q) < 1:
+        return jsonify({"suggestions": []})
+
+    suggestions = []
+
+    # 城市建议（从别名表）
+    for cn, aliases in CITY_ALIASES.items():
+        if q in cn:
+            suggestions.append({"type": "city", "text": cn})
+        else:
+            for alias in aliases:
+                if q.lower() in alias.lower():
+                    suggestions.append({"type": "city", "text": cn})
+                    break
+
+    # 人物建议
+    conn = get_db()
+    person_rows = conn.execute(
+        "SELECT name FROM persons WHERE name LIKE ? AND name IS NOT NULL LIMIT 5",
+        (f"%{q}%",)
+    ).fetchall()
+    for r in person_rows:
+        suggestions.append({"type": "person", "text": r["name"]})
+
+    # 去重
+    seen = set()
+    unique = []
+    for s in suggestions:
+        if s["text"] not in seen:
+            seen.add(s["text"])
+            unique.append(s)
+
+    conn.close()
+    return jsonify({"suggestions": unique[:10]})
 
 
 # ── 缩略图 API ────────────────────────────────────────────
