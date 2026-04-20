@@ -9,7 +9,16 @@ import sys
 import io
 import json
 import time
+import logging
 # import sqlite3 不再直接使用，由 backend.db.connection 负责
+
+# ── 日志配置 ──
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+)
+logger = logging.getLogger("photomemory")
 
 # Ensure project root is on sys.path for 'backend.*' imports
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -69,6 +78,16 @@ FRONTEND_DIR = os.path.join(os.path.dirname(__file__), "..", "frontend")
 app = Flask(__name__, static_folder=FRONTEND_DIR, static_url_path="/")
 # 限制 CORS 来源（生产环境应配置具体域名）
 CORS(app, origins=["http://localhost:*", "https://localhost:*"], supports_credentials=True)
+
+
+@app.errorhandler(Exception)
+def handle_unhandled_exception(e):
+    """全局异常处理：记录未预期错误"""
+    from werkzeug.exceptions import HTTPException
+    if isinstance(e, HTTPException):
+        return e
+    logger.exception("Unhandled exception on %s %s", request.method, request.path)
+    return jsonify({"error": "服务器内部错误"}), 500
 
 @app.before_request
 def force_https():
@@ -138,9 +157,8 @@ def pair_request():
     }
     from backend.auth.pairing import save_devices
     save_devices(_DEVICES_FILE, _devices)
-    print(f"[Pairing] 新设备申请: {device_name} ({device_id}) from {request.remote_addr}")
-    print(f"[Pairing] 审批命令: curl -X POST http://localhost:8765/api/pair/approve "
-          f"-H 'Authorization: Bearer <admin_token>' -d '{{\"device_id\":\"{device_id}\"}}'")
+    logger.info("Pairing request: device=%s id=%s ip=%s", device_name, device_id, request.remote_addr)
+    logger.info("Pairing approve cmd: curl -X POST .../api/pair/approve -d device_id=%s", device_id)
     return jsonify({"status": "pending", "message": "申请已提交，等待管理员审批"})
 
 
@@ -187,7 +205,7 @@ def pair_approve():
     }
     from backend.auth.pairing import save_devices
     save_devices(_DEVICES_FILE, _devices)
-    print(f"[Pairing] ✅ 已批准: {pending['device_name']} ({device_id})")
+    logger.info("Pairing approved: device=%s id=%s", pending['device_name'], device_id)
     return jsonify({"ok": True, "device_id": device_id, "device_name": pending["device_name"]})
 
 
@@ -613,9 +631,7 @@ def thumbnail(photo_id):
             pass
         return send_file(io.BytesIO(data), mimetype="image/jpeg")
     except Exception as e:
-        from traceback import print_exc
-        print(f"[THUMB ERROR] photo_id={photo_id} path={path} error={e}")
-        print_exc()
+        logger.error("Thumbnail error: photo_id=%d path=%s", photo_id, path, exc_info=True)
         data = placeholder_thumbnail(size)
         return send_file(io.BytesIO(data), mimetype="image/jpeg")
 
@@ -830,6 +846,7 @@ def face_thumbnail(face_id):
         buf.seek(0)
         return send_file(buf, mimetype="image/jpeg")
     except Exception as e:
+        logger.exception("face_thumb failed for face_id=%s", face_id)
         abort(500)
 
 
@@ -877,8 +894,8 @@ def stats_timeline():
         result = [{"month": r["month"], "count": r["count"]} for r in rows if r["month"]]
         return jsonify(result)
     except Exception as e:
-        print(f"[stats_timeline] error: {e}")
-        return jsonify({"error": str(e)}), 500
+        logger.exception("stats_timeline failed")
+        return jsonify({"error": "内部错误"}), 500
 
 @app.route("/api/stats/persons", methods=["GET"])
 @require_auth
@@ -904,8 +921,8 @@ def stats_persons():
         ]
         return jsonify(result)
     except Exception as e:
-        print(f"[stats_persons] error: {e}")
-        return jsonify({"error": str(e)}), 500
+        logger.exception("stats_persons failed")
+        return jsonify({"error": "内部错误"}), 500
 
 @app.route("/api/photos/random", methods=["GET"])
 @require_auth
@@ -946,8 +963,8 @@ def photos_random():
             })
         return jsonify({"results": results, "total": len(results)})
     except Exception as e:
-        print(f"[photos_random] error: {e}")
-        return jsonify({"error": str(e)}), 500
+        logger.exception("photos_random failed")
+        return jsonify({"error": "内部错误"}), 500
 
 
 @app.route("/api/stats", methods=["GET"])
@@ -1060,7 +1077,7 @@ def api_photos_random():
             results[-1]["original_url"] = f"/api/photo/{r['id']}"
         return jsonify({"results": results, "total": len(results)})
     except Exception as e:
-        print(f"[api_photos_random] error: {e}")
+        logger.exception("api_photos_random failed")
         return jsonify({"error": str(e)}), 500
 
 
@@ -1562,9 +1579,7 @@ if __name__ == "__main__":
     print(f"   DB    : {DB_PATH}")
     print(f"   URL   : http://localhost:{args.port}")
     if PAIRING_ENABLED:
-        print(f"   Auth  : ✅ Device Pairing 已启用")
-        print(f"   Admin : {ADMIN_TOKEN}")
-        print(f"   设备数: {len(_devices['paired'])} 已配对, {len(_devices['pending'])} 待审批")
+        logger.info("Auth: Device Pairing enabled, %d paired, %d pending", len(_devices['paired']), len(_devices['pending']))
     else:
-        print(f"   Auth  : ⚠️  未设置 --admin-token，开放访问")
+        logger.warning("Auth: No --admin-token, open access!")
     app.run(host=args.host, port=args.port, debug=False)
