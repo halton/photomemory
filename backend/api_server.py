@@ -50,8 +50,6 @@ _face_scan_state: dict = {"running": False, "total": 0, "processed": 0, "error":
 SESSION_COOKIE = "pm_session"
 SESSION_TTL_HOURS = 720      # 30天 cookie
 
-_face_scan_state = {"running": False, "total": 0, "processed": 0, "error": None}
-
 # 设备存储（生产可换 JSON 文件持久化；这里内存+文件双写）
 _DEVICES_FILE: Path = None   # 初始化时设置
 
@@ -453,9 +451,7 @@ def search():
 
     if date_from:
         conditions.append("p.taken_at >= ?")
-        params.append(date_from.replace("-", ":").replace("-", ":") if ":" not in date_from else date_from)
-        conditions[-1] = "p.taken_at >= ?"
-        params[-1] = date_from
+        params.append(date_from)
 
     if date_to:
         conditions.append("p.taken_at <= ?")
@@ -535,6 +531,8 @@ def search():
             "height": r["height"],
             "is_screenshot": bool(r["is_screenshot"]),
             "is_duplicate": bool(r["is_duplicate"]),
+            "is_video": Path(r["path"]).suffix.lower() in VIDEO_EXTS,
+            "video_url": f"/api/video/{r['id']}" if Path(r["path"]).suffix.lower() in VIDEO_EXTS else None,
             "dir_label": r["directory"],
             "thumb_url": f"/api/thumb/{r['id']}",
             "original_url": f"/api/photo/{r['id']}",
@@ -575,8 +573,21 @@ def thumbnail(photo_id):
 
     # 视频：用 ffmpeg 截取第1秒帧
     if ext in VIDEO_EXTS:
+        cache_dir = Path(DB_PATH).parent / "thumbs"
+        cache_dir.mkdir(exist_ok=True)
+        try:
+            mtime = int(os.path.getmtime(path))
+        except Exception:
+            mtime = 0
+        cache_file = cache_dir / f"v_{photo_id}_{size}_{mtime}.jpg"
+        if cache_file.exists():
+            return send_file(str(cache_file), mimetype="image/jpeg")
         try:
             data = generate_video_thumbnail(path, size)
+            try:
+                cache_file.write_bytes(data)
+            except Exception:
+                pass
             return send_file(io.BytesIO(data), mimetype="image/jpeg")
         except Exception:
             data = placeholder_thumbnail(size, "🎬")
@@ -610,59 +621,6 @@ def thumbnail(photo_id):
 
 
 
-# 2026/04/14 提取到 backend/services/thumbnail.py
-
-    """用 ffmpeg 截取视频第1秒画面作为缩略图"""
-    ffmpeg = _find_ffmpeg()
-    if not ffmpeg:
-        # ffmpeg 不可用时返回占位图
-        return _placeholder_thumb(size, "🎬")
-
-    try:
-        with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as tmp:
-            tmp_path = tmp.name
-
-        result = subprocess.run([
-            ffmpeg, "-y", "-ss", "00:00:01",
-            "-i", path,
-            "-vframes", "1",
-            "-vf", f"scale={size}:{size}:force_original_aspect_ratio=decrease",
-            "-q:v", "3",
-            tmp_path
-        ], capture_output=True, timeout=10)
-
-        if result.returncode == 0 and os.path.exists(tmp_path):
-            with open(tmp_path, "rb") as f:
-                data = f.read()
-            os.unlink(tmp_path)
-            return send_file(io.BytesIO(data), mimetype="image/jpeg")
-        else:
-            if os.path.exists(tmp_path):
-                os.unlink(tmp_path)
-            return _placeholder_thumb(size, "🎬")
-    except Exception:
-        return _placeholder_thumb(size, "🎬")
-
-
-def _find_ffmpeg():
-    for p in ["/opt/homebrew/bin/ffmpeg", "/usr/local/bin/ffmpeg", "/usr/bin/ffmpeg"]:
-        if os.path.exists(p):
-            return p
-    result = subprocess.run(["which", "ffmpeg"], capture_output=True, text=True)
-    if result.returncode == 0:
-        return result.stdout.strip()
-    return None
-
-
-def _placeholder_thumb(size: int, emoji: str = "?"):
-    """生成纯色占位缩略图"""
-    img = Image.new("RGB", (size, size), color=(40, 40, 40))
-    buf = io.BytesIO()
-    img.save(buf, "JPEG")
-    buf.seek(0)
-    return send_file(buf, mimetype="image/jpeg")
-
-
 # ── 原图 API ──────────────────────────────────────────────
 
 @app.route("/api/photo/<int:photo_id>")
@@ -687,6 +645,61 @@ def original_photo(photo_id):
     }
     mime = mime_map.get(ext, "application/octet-stream")
     return send_file(path, mimetype=mime, as_attachment=False)
+
+
+@app.route("/api/video/<int:photo_id>")
+@require_auth
+def stream_video(photo_id):
+    """视频流式播放，支持 HTTP Range 请求"""
+    conn = get_db()
+    row = conn.execute("SELECT path, filename FROM photos WHERE id=?", (photo_id,)).fetchone()
+    conn.close()
+    if not row:
+        abort(404)
+    path = row["path"]
+    if not is_safe_path(path):
+        abort(403)
+    if not os.path.exists(path):
+        abort(404)
+    ext = Path(path).suffix.lower()
+    if ext not in VIDEO_EXTS:
+        abort(400, description="不是视频文件")
+
+    file_size = os.path.getsize(path)
+    mime_map = {".mp4": "video/mp4", ".mov": "video/quicktime", ".avi": "video/x-msvideo",
+                ".mkv": "video/x-matroska", ".m4v": "video/x-m4v", ".3gp": "video/3gpp"}
+    mime = mime_map.get(ext, "video/mp4")
+
+    range_header = request.headers.get("Range")
+    if range_header:
+        byte_start = 0
+        byte_end = file_size - 1
+        match = __import__('re').match(r'bytes=(\d+)-(\d*)', range_header)
+        if match:
+            byte_start = int(match.group(1))
+            if match.group(2):
+                byte_end = int(match.group(2))
+        length = byte_end - byte_start + 1
+
+        def generate():
+            with open(path, 'rb') as f:
+                f.seek(byte_start)
+                remaining = length
+                while remaining > 0:
+                    chunk = f.read(min(8192, remaining))
+                    if not chunk:
+                        break
+                    remaining -= len(chunk)
+                    yield chunk
+
+        resp = make_response(generate(), 206)
+        resp.headers['Content-Type'] = mime
+        resp.headers['Content-Range'] = f'bytes {byte_start}-{byte_end}/{file_size}'
+        resp.headers['Content-Length'] = length
+        resp.headers['Accept-Ranges'] = 'bytes'
+        return resp
+    else:
+        return send_file(path, mimetype=mime)
 
 
 # ── 人物 API ──────────────────────────────────────────────
