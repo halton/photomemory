@@ -1,0 +1,13 @@
+{
+  "nodeId": "code-review",
+  "nodeType": "review",
+  "runId": "run_1",
+  "status": "completed",
+  "timestamp": "2026-04-20T14:20:00Z",
+  "summary": "Backend: 🔴 deque thread-safety in perf_stats iteration, 🟡 connection management, middleware filtering. Tests: 🔴 permissive status codes (accept 3+ codes), 🔴 no mutation verification in PATCH tests. Both reviewers note solid foundation but gaps in rigor.",
+  "verdict": "ITERATE",
+  "artifacts": [
+    {"type": "file", "path": ".harness/nodes/code-review/run_1/eval-backend.md"},
+    {"type": "file", "path": ".harness/nodes/code-review/run_1/eval-tester.md"}
+  ]
+}

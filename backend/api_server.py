@@ -79,6 +79,43 @@ app = Flask(__name__, static_folder=FRONTEND_DIR, static_url_path="/")
 # 限制 CORS 来源（生产环境应配置具体域名）
 CORS(app, origins=["http://localhost:*", "https://localhost:*"], supports_credentials=True)
 
+# ── Performance monitoring middleware ──
+from flask import g
+from collections import deque
+perf_logger = logging.getLogger("photomemory.perf")
+_perf_ring = deque(maxlen=100)
+
+@app.before_request
+def _start_timer():
+    g.start_time = time.time()
+
+@app.after_request
+def _log_request_time(response):
+    if hasattr(g, 'start_time'):
+        elapsed = (time.time() - g.start_time) * 1000
+        entry = {
+            "path": request.path,
+            "method": request.method,
+            "status": response.status_code,
+            "duration_ms": round(elapsed, 2),
+            "query": request.args.get("q", ""),
+            "ts": time.time(),
+        }
+        _perf_ring.append(entry)
+        perf_logger.info("api_request", extra=entry)
+        response.headers["X-Response-Time"] = f"{elapsed:.2f}ms"
+    return response
+
+
+@app.route("/api/perf/stats", methods=["GET"])
+@require_auth
+def perf_stats():
+    """Return recent slow requests (>500ms) from ring buffer"""
+    threshold = float(request.args.get("threshold", 500))
+    snapshot = list(_perf_ring)  # thread-safe snapshot
+    slow = [e for e in snapshot if e["duration_ms"] > threshold]
+    return jsonify({"slow_requests": slow, "total_tracked": len(snapshot)})
+
 
 @app.errorhandler(Exception)
 def handle_unhandled_exception(e):
@@ -580,12 +617,23 @@ def search_suggest():
 
     # 人物建议
     conn = get_db()
+    safe_q = q.replace("%", "\\%").replace("_", "\\_")
     person_rows = conn.execute(
-        "SELECT name FROM persons WHERE name LIKE ? AND name IS NOT NULL LIMIT 5",
-        (f"%{q}%",)
+        "SELECT name FROM persons WHERE name LIKE ? ESCAPE '\\' AND name IS NOT NULL LIMIT 5",
+        (f"%{safe_q}%",)
     ).fetchall()
     for r in person_rows:
         suggestions.append({"type": "person", "text": r["name"]})
+
+    # 目录建议 (escape LIKE wildcards)
+    safe_q = q.replace("%", "\\%").replace("_", "\\_")
+    dir_rows = conn.execute(
+        "SELECT DISTINCT directory FROM photos WHERE directory LIKE ? ESCAPE '\\' LIMIT 5",
+        (f"%{safe_q}%",)
+    ).fetchall()
+    for r in dir_rows:
+        if r["directory"]:
+            suggestions.append({"type": "folder", "text": r["directory"]})
 
     # 去重
     seen = set()
@@ -1260,7 +1308,15 @@ def face_scan_status():
 
 @app.route("/api/health")
 def health():
-    return jsonify({"status": "ok", "db": DB_PATH})
+    """健康检查：验证 DB 连通性"""
+    try:
+        conn = get_db()
+        count = conn.execute("SELECT COUNT(*) FROM photos").fetchone()[0]
+        conn.close()
+        return jsonify({"status": "ok", "db": DB_PATH, "photos": count})
+    except Exception as e:
+        logger.error("Health check failed: %s", e)
+        return jsonify({"status": "error"}), 503
 
 
 # ── 主入口 ────────────────────────────────────────────────
@@ -1406,6 +1462,37 @@ def remove_photo_from_album(album_id, photo_id):
     conn.commit()
     conn.close()
     return jsonify({"ok": True, "removed": photo_id})
+
+@app.route("/api/albums/<int:album_id>", methods=["PATCH"])
+@require_auth
+def update_album(album_id):
+    data = request.get_json(force=True)
+    conn = get_db()
+    album = conn.execute("SELECT id FROM albums WHERE id=?", (album_id,)).fetchone()
+    if not album:
+        conn.close()
+        abort(404)
+    updates = []
+    params = []
+    if "name" in data:
+        updates.append("name=?")
+        params.append(data["name"])
+    if "description" in data:
+        updates.append("description=?")
+        params.append(data["description"])
+    if "cover_photo_id" in data:
+        updates.append("cover_photo_id=?")
+        params.append(data["cover_photo_id"])
+    if not updates:
+        conn.close()
+        return jsonify({"ok": False, "error": "nothing to update"}), 400
+    updates.append("updated_at=datetime('now')")
+    params.append(album_id)
+    conn.execute(f"UPDATE albums SET {','.join(updates)} WHERE id=?", params)
+    conn.commit()
+    conn.close()
+    return jsonify({"ok": True})
+
 
 @app.route("/api/albums/<int:album_id>", methods=["DELETE"])
 @require_auth

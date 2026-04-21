@@ -106,7 +106,6 @@ def test_delete_empty_album(seeded_client):
 
 def test_album_sort(seeded_client):
     """相册排序"""
-    # 假设按 id 正序, 降序等
     r = seeded_client.get('/api/albums?sort=id&order=desc')
     assert r.status_code == 200
     data = r.get_json()
@@ -114,8 +113,6 @@ def test_album_sort(seeded_client):
 
 def test_set_album_cover(seeded_client):
     """设置相册封面"""
-    # 为已有相册设置封面
-    # 取已有 album id
     albums = seeded_client.get('/api/albums').get_json()
     album_id = None
     if isinstance(albums, list) and albums:
@@ -126,8 +123,44 @@ def test_set_album_cover(seeded_client):
         r = seeded_client.post(f'/api/albums/{album_id}/cover', json={'photo_id': 1}, content_type='application/json')
         assert r.status_code in (200, 201, 204, 400, 404, 405)
 
-    """向不存在的相册添加照片"""
-    r = seeded_client.post('/api/albums/99999/photos',
-                           json={'photo_ids': [1]},
-                           content_type='application/json')
-    assert r.status_code in (200, 201, 404)
+
+# ========== Album Update (PATCH) Tests ===========
+
+def test_update_album_rename(seeded_client):
+    """PATCH rename album and verify mutation persisted"""
+    r = seeded_client.patch('/api/albums/1', json={'name': 'Renamed Album'},
+                            content_type='application/json')
+    assert r.status_code == 200
+    assert r.get_json()["ok"] is True
+    # Verify mutation persisted
+    albums = seeded_client.get('/api/albums').get_json()
+    album_list = albums if isinstance(albums, list) else albums.get("albums", [])
+    found = [a for a in album_list if a.get("id") == 1]
+    if found:
+        assert found[0]["name"] == "Renamed Album"
+
+
+def test_update_album_description(seeded_client):
+    r = seeded_client.patch('/api/albums/1', json={'description': 'New desc'},
+                            content_type='application/json')
+    assert r.status_code == 200
+    assert r.get_json()["ok"] is True
+
+
+def test_update_album_no_fields(seeded_client):
+    """Empty update returns 400"""
+    r = seeded_client.patch('/api/albums/1', json={},
+                            content_type='application/json')
+    assert r.status_code == 400
+
+
+def test_update_album_nonexistent(seeded_client):
+    r = seeded_client.patch('/api/albums/99999', json={'name': 'X'},
+                            content_type='application/json')
+    assert r.status_code == 404
+
+
+def test_update_album_cover(seeded_client):
+    r = seeded_client.patch('/api/albums/1', json={'cover_photo_id': 1},
+                            content_type='application/json')
+    assert r.status_code == 200

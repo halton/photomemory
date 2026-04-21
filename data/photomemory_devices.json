@@ -25,7 +25,7 @@
       "requested_at": "2026-04-13T17:34:21.320319",
       "ip": "127.0.0.1",
       "token": "xrk85g99oHKe-YzNnstfJl5is6ZIPQ7tjWqrbd_lB-E",
-      "status": "active",
+      "status": "revoked",
       "approved_at": "2026-04-13T17:35:54.862447",
       "token_delivered": false
     }

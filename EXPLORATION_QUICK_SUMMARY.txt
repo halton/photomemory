@@ -1,0 +1,185 @@
+╔══════════════════════════════════════════════════════════════════════════════╗
+║           PHOTOMEMORY PROJECT - EXPLORATION SUMMARY (2026-04-20)             ║
+║                     All findings with file paths & line numbers              ║
+╚══════════════════════════════════════════════════════════════════════════════╝
+
+🔴 CRITICAL ISSUES (Production blockers)
+
+1. INCOMPLETE FASTAPI MIGRATION
+   └─ backend/api_fastapi.py: 211 LOC (only 5% of routes)
+   └─ backend/api_server.py: 1,557 LOC (still handles 95% of API)
+   └─ Line 199: # TODO: 继续迁移 /api 相关路由和依赖
+   └─ Impact: Two code paths, maintenance nightmare
+
+2. SILENT ERROR HANDLING (10+ bare exception blocks)
+   ├─ api_server.py:581 ......... Video thumbnail → emoji placeholder
+   ├─ api_server.py:590 ......... File mtime retrieval
+   ├─ api_server.py:601 ......... Cache file write
+   ├─ api_server.py:643 ......... Duplicate video function
+   ├─ api_server.py:810 ......... FACE CRASH: bbox JSON unchecked
+   ├─ api_server.py:951 ......... Person count query
+   ├─ api_server.py:961 ......... Directory list
+   ├─ services/thumbnail.py:26 .. EXIF transpose
+   ├─ db_util.py:15 ............. PRAGMA settings
+   ├─ auth/pairing.py:16 ........ Device JSON parsing
+   ├─ cache_util.py:47 .......... Cache key generation
+   └─ db/async_connection.py:54 . Semaphore release
+
+   💥 CRITICAL: Face brightness detection (line 810)
+      - bbox = json.loads(face["bbox"]) ← NO validation
+      - x, y = int(point[0]), int(point[1]) ← Could be out of bounds
+      - img.getpixel((x, y))[2] ← IndexError uncaught
+
+3. MINIMAL VIDEO SUPPORT
+   ├─ Formats supported: .mov, .mp4, .avi, .mkv, .m4v, .3gp (line 68)
+   ├─ Missing: webm, flv, ts, m3u8
+   ├─ No metadata: duration, codec, bitrate, fps (db/migrations.py)
+   ├─ No streaming: HLS/DASH, HTTP range requests (api_server.py:624)
+   ├─ No UI: No HTML5 <video> player (frontend/)
+   ├─ Fragile: Hardcoded ffmpeg paths (services/thumbnail.py:40)
+   └─ Code duplication: _find_ffmpeg() + find_ffmpeg()
+      ├─ api_server.py:647-654 (OLD, unused)
+      └─ services/thumbnail.py:36-46 (NEW, preferred)
+
+🟠 HIGH PRIORITY (Fix this sprint)
+
+4. SEARCH INEFFICIENCY
+   ├─ Exponential OR complexity (api_server.py:478-495)
+   │  └─ "Beijing" → 10 aliases → 30 OR conditions → full table scan
+   ├─ N+1 query pattern (api_server.py:549)
+   │  └─ _is_person_query() hits DB per search, no caching
+   ├─ Missing indices (db/migrations.py)
+   │  ├─ ✅ idx_taken_at, idx_gps_city, idx_hash, idx_is_screenshot
+   │  └─ ❌ idx_filename, idx_directory, idx_gps_city_taken_at
+   ├─ Pagination inefficient (api_server.py:429-430, 506-508)
+   │  └─ Offset-based (O(n)) instead of cursor-based
+   └─ Chinese support limited
+      └─ Only 24 cities mapped (should be 300+)
+
+5. NO STRUCTURED LOGGING
+   └─ Using print() throughout (api_server.py lines 143, 144, 192, 606, 867, etc.)
+   └─ Stack traces only printed for thumbnail errors (line 606)
+   └─ Lost error context in production (no logging module)
+
+6. INPUT VALIDATION MISSING
+   └─ api_server.py:429-430
+      ├─ limit = min(int(request.args.get("limit", 50)), 200)  ← ValueError if "abc"
+      └─ offset = int(request.args.get("offset", 0))           ← ValueError if "xyz"
+
+7. DATABASE CONNECTION ISSUES
+   └─ backend/db_util.py:18-21
+      ├─ ❌ No connection pooling (new connection per request)
+      ├─ ❌ No timeout (sqlite3.connect() can hang indefinitely)
+      ├─ ⚠️  Manual close pattern (conn.close() easy to forget)
+      └─ ✅ WAL mode enabled (improves concurrency)
+
+🟡 MEDIUM (Nice to have)
+
+8. MEMORY LEAK: _pair_req_rate dict (api_server.py:92-107)
+   └─ Only cleans previous minute window
+   └─ With 100 unique IPs: 1.4M entries in 10 days
+
+9. TEMP FILE CLEANUP (api_server.py:621-640)
+   └─ FFmpeg failure leaves files in /tmp
+   └─ except Exception: return _placeholder_thumb() ← no cleanup
+
+10. DATABASE TRANSACTIONS
+    └─ ✅ 12 commits present
+    └─ ❌ No rollback on error
+    └─ ❌ No transaction context managers
+
+═══════════════════════════════════════════════════════════════════════════════
+
+📊 PROJECT STATISTICS
+
+Backend:        2,680 LOC (27 files)
+  api_server.py: 1,570 LOC
+  api_fastapi.py: 211 LOC
+  services/: ~300 LOC
+  db/: ~200 LOC
+  auth/: ~100 LOC
+
+Frontend:       280 KB (7 files)
+Tests:          1,200 LOC (11 files)
+  Total: 130 tests, 100% passing
+  Coverage: ~20% of core handlers
+  FastAPI tested: 0 tests
+
+═══════════════════════════════════════════════════════════════════════════════
+
+✅ WHAT'S WORKING WELL
+
+✓ Device Pairing (auth system with secrets.compare_digest)
+✓ Face Recognition Integration  
+✓ SQLite PRAGMA Optimizations (WAL, cache, mmap)
+✓ Thumbnail Caching (with mtime invalidation)
+✓ GPS Coordinate Reversal Geocoding
+✓ Path Traversal Protection (is_safe_path() correctly used)
+✓ SQL Injection Protection (parameterized queries)
+✓ Core search logic (time/location/person filters work)
+
+═══════════════════════════════════════════════════════════════════════════════
+
+📈 PRODUCTION READINESS: 35%
+
+✅ Can handle:     Single-user NAS, <10k photos, images only
+❌ Cannot handle:  Multi-user, >10k photos, large video libraries
+
+Estimated effort to production: 6-8 weeks of focused work
+
+═══════════════════════════════════════════════════════════════════════════════
+
+📋 PRIORITY FIXES (Recommended order)
+
+Week 1: Error Handling & Logging
+├─ Implement logging module (replace all print())
+├─ Wrap all DB operations in try-except-log
+├─ Add error details to HTTP 500 responses
+└─ Est. 15 hours
+
+Week 2: Critical Bugs
+├─ Fix face thumbnail crash (JSON + bounds checking)
+├─ Fix temp file cleanup in video thumbnail
+├─ Add input validation (?limit=?offset=)
+├─ Fix _pair_req_rate memory leak
+└─ Est. 8 hours
+
+Week 3: Search Optimization
+├─ Add missing DB indices
+├─ Cache person names (avoid N+1)
+├─ Optimize Chinese alias expansion
+├─ Implement cursor-based pagination
+└─ Est. 12 hours
+
+Week 4: Video Support
+├─ Add metadata extraction (ffprobe)
+├─ Implement HTTP range requests
+├─ Build HTML5 video player UI
+├─ Test codec compatibility
+└─ Est. 25 hours
+
+Weeks 5-6: Framework Migration
+├─ Decide: Complete FastAPI OR revert to Flask-only
+├─ Migrate remaining 95% of routes (if FastAPI)
+├─ Ensure async/await patterns work
+└─ Est. 35 hours
+
+═══════════════════════════════════════════════════════════════════════════════
+
+📄 DETAILED REPORT
+
+Full report saved to:
+  COMPREHENSIVE_EXPLORATION_REPORT.md
+
+Includes:
+  • Code samples and exact line numbers
+  • Risk assessment for each issue
+  • Time estimates for fixes
+  • Architecture analysis
+  • Testing coverage gaps
+  • File-by-file breakdown
+  • Implementation recommendations
+
+═══════════════════════════════════════════════════════════════════════════════
+
+Generated: 2026-04-20 | Repository: /Users/huohaitao/.openclaw/workspace-daddy/projects/photomemory

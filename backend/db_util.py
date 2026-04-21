@@ -1,4 +1,8 @@
 import sqlite3
+import logging
+
+logger = logging.getLogger("photomemory.db")
+
 
 def set_sqlite_pragmas(conn):
     """
@@ -12,10 +16,12 @@ def set_sqlite_pragmas(conn):
         c.execute('PRAGMA temp_store=MEMORY;')
         c.execute('PRAGMA cache_size=-20000;')  # ~20MB
         c.execute('PRAGMA mmap_size=268435456;')  # 256MB
-    except Exception:
-        pass
+        c.execute('PRAGMA busy_timeout=5000;')  # 5s wait on lock
+    except Exception as e:
+        logger.warning("Failed to set pragmas: %s", e)
+
 
 def get_optimized_connection(db_path):
-    conn = sqlite3.connect(db_path)
+    conn = sqlite3.connect(db_path, timeout=10, check_same_thread=False)
     set_sqlite_pragmas(conn)
     return conn

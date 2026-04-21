@@ -1,0 +1,32 @@
+{
+  "version": "1.0",
+  "flowTemplate": "build-verify",
+  "currentNode": "gate",
+  "entryNode": "build",
+  "totalSteps": 3,
+  "maxTotalSteps": 20,
+  "maxLoopsPerEdge": 3,
+  "maxNodeReentry": 5,
+  "history": [
+    {
+      "nodeId": "code-review",
+      "runId": "run_1",
+      "timestamp": "2026-04-20T10:50:42.244Z"
+    },
+    {
+      "nodeId": "test-verify",
+      "runId": "run_1",
+      "timestamp": "2026-04-20T10:52:14.106Z"
+    },
+    {
+      "nodeId": "gate",
+      "runId": "run_1",
+      "timestamp": "2026-04-20T10:53:59.023Z"
+    }
+  ],
+  "edgeCounts": {
+    "build→code-review": 1,
+    "code-review→test-verify": 1,
+    "test-verify→gate": 1
+  }
+}

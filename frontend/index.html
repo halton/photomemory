@@ -22,7 +22,9 @@
   @media (max-width: 768px) {
     .search-wrap { max-width: none; width: 100%; }
     .search-wrap input { font-size: 15px; }
-    header { flex-wrap: wrap; }
+    header { flex-wrap: wrap; gap: 8px; padding: 10px 12px; overflow: hidden; }
+    header h1 { font-size: 16px; }
+    header .btn.secondary { font-size: 12px; padding: 6px 10px; }
   }
   .search-wrap input { flex: 1; background: #2a2a2a; border: 1px solid #3a3a3a;
     border-radius: 8px; padding: 8px 14px; color: #e0e0e0; font-size: 14px;
@@ -144,6 +146,52 @@
   .load-more { text-align: center; padding: 24px;
                display: none; }
   .load-more.show { display: block; }
+
+  /* Typeahead Suggestions */
+  .search-wrap { position: relative; }
+  .suggest-dropdown {
+    position: absolute; top: 100%; left: 0; right: 0; margin-top: 4px;
+    background: #2a2a2a; border: 1px solid #3a3a3a; border-radius: 8px;
+    max-height: 320px; overflow-y: auto; z-index: 200;
+    opacity: 0; transform: translateY(-4px);
+    transition: opacity 0.15s, transform 0.15s;
+    pointer-events: none; box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+  }
+  .suggest-dropdown.visible { opacity: 1; transform: translateY(0); pointer-events: auto; }
+  .suggest-item {
+    padding: 10px 14px; cursor: pointer; display: flex; align-items: center; gap: 10px;
+    font-size: 14px; color: #ccc; border-bottom: 1px solid #333;
+  }
+  .suggest-item:last-child { border-bottom: none; }
+  .suggest-item:hover, .suggest-item.active { background: #6366f1; color: #fff; }
+  .suggest-item .sicon { font-size: 16px; flex-shrink: 0; }
+  .suggest-loading { padding: 12px; text-align: center; color: #666; font-size: 13px; }
+  @media (max-width: 768px) {
+    .suggest-dropdown { left: -24px; right: -24px; border-radius: 0 0 8px 8px; }
+  }
+
+  /* Video player overlay */
+  .lightbox-video-wrap { position: relative; display: flex; align-items: center; justify-content: center; }
+  .lightbox-video-wrap video {
+    max-width: calc(100vw - 340px); max-height: 92vh; border-radius: 6px; background: #000;
+  }
+  @media (max-width: 768px) {
+    .lightbox-video-wrap video { max-width: 100vw; max-height: 80vh; }
+  }
+  .video-play-overlay {
+    position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+    cursor: pointer; z-index: 2;
+  }
+  .video-play-overlay .play-circle {
+    width: 72px; height: 72px; border-radius: 50%; background: rgba(99,102,241,0.85);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 32px; color: #fff; transition: transform 0.15s;
+  }
+  .video-play-overlay:hover .play-circle { transform: scale(1.1); }
+  .video-duration-badge {
+    display: inline-block; background: #6366f1; color: #fff; font-size: 12px;
+    padding: 2px 8px; border-radius: 4px; margin-left: 8px;
+  }
 
   /* Lightbox */
   .lightbox { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.92);
@@ -622,7 +670,8 @@
 <header>
   <h1>Photo<span>Memory</span></h1>
   <div class="search-wrap">
-    <input type="text" id="searchInput" placeholder="搜索人物、地点、时间..." />
+    <input type="text" id="searchInput" placeholder="搜索人物、地点、时间..." autocomplete="off" />
+    <div class="suggest-dropdown" id="suggestDropdown"></div>
     <button class="btn" onclick="doSearch()">搜索</button>
   </div>
   <button class="btn secondary" onclick="showView('persons')">👤 人物</button>
@@ -789,7 +838,9 @@
   <div class="lightbox-main">
     <div class="lightbox-inner">
       <button class="lightbox-nav prev" onclick="lightboxNav(-1)">‹</button>
-      <img id="lightboxImg" src="" alt="">
+      <div id="lightboxMediaWrap">
+        <img id="lightboxImg" src="" alt="">
+      </div>
       <button class="lightbox-nav next" onclick="lightboxNav(1)">›</button>
     </div>
   </div>
@@ -806,6 +857,7 @@
       <div class="lb-row"><span class="icon">📍</span><span class="val" id="lbLocation">-</span></div>
       <div class="lb-row"><span class="icon">📐</span><span class="val" id="lbSize">-</span></div>
       <div class="lb-row"><span class="icon">💾</span><span class="val" id="lbFilesize">-</span></div>
+      <div class="lb-row" id="lbDurationRow" style="display:none"><span class="icon">🎬</span><span class="val" id="lbDuration">-</span></div>
       <div class="lb-row"><span class="icon">🗂️</span><span class="val" id="lbDir">-</span></div>
     </div>
     <div class="lb-section" id="lbGpsSection" style="display:none">
@@ -1778,8 +1830,36 @@ async function updateLightbox() {
   const p = currentResults[lightboxIndex];
   if (!p) return;
 
-  // 图片
-  document.getElementById('lightboxImg').src = authUrl(`/api/photo/${p.id}`);
+  // 图片 or 视频
+  const mediaWrap = document.getElementById('lightboxMediaWrap');
+  const durationRow = document.getElementById('lbDurationRow');
+  if (p.is_video && p.video_url) {
+    mediaWrap.innerHTML = `
+      <div class="lightbox-video-wrap">
+        <video id="lightboxVideo" controls playsinline preload="metadata"
+               src="${authUrl(p.video_url)}"
+               style="max-width:calc(100vw - 340px);max-height:92vh;border-radius:6px;background:#000">
+        </video>
+        <div class="video-play-overlay" id="videoPlayOverlay" onclick="document.getElementById('lightboxVideo').play();this.style.display='none'">
+          <div class="play-circle">▶</div>
+        </div>
+      </div>`;
+    const vid = document.getElementById('lightboxVideo');
+    vid.addEventListener('play', () => { document.getElementById('videoPlayOverlay').style.display = 'none'; });
+    vid.addEventListener('pause', () => { document.getElementById('videoPlayOverlay').style.display = ''; });
+    vid.addEventListener('loadedmetadata', () => {
+      const dur = vid.duration;
+      if (dur && isFinite(dur)) {
+        const m = Math.floor(dur/60), s = Math.floor(dur%60);
+        document.getElementById('lbDuration').textContent = `${m}:${s.toString().padStart(2,'0')}`;
+        durationRow.style.display = '';
+      }
+    });
+    durationRow.style.display = 'none';
+  } else {
+    mediaWrap.innerHTML = `<img id="lightboxImg" src="${authUrl(`/api/photo/${p.id}`)}" alt="">`;
+    durationRow.style.display = 'none';
+  }
 
   // 基础信息
   document.getElementById('lbFilename').textContent = p.filename || '-';
@@ -1872,6 +1952,8 @@ function lightboxNav(dir) {
 
 function closeLightbox() {
   hideLightboxToolbar();
+  const vid = document.getElementById('lightboxVideo');
+  if (vid) { vid.pause(); vid.src = ''; }
   document.getElementById('lightbox').classList.remove('open');
 }
 
@@ -2407,6 +2489,129 @@ async function submitRename() {
   loadPersonsView();
   loadPersonsSidebar();
 }
+
+// ── Typeahead Search Suggestions ─────────────────────────
+(function(){
+  const input = document.getElementById('searchInput');
+  const dropdown = document.getElementById('suggestDropdown');
+  let debounceTimer = null;
+  let activeIdx = -1;
+  let suggestions = [];
+
+  function escapeHtml(str) {
+    const d = document.createElement('div');
+    d.textContent = str;
+    return d.innerHTML;
+  }
+
+  function typeIcon(type) {
+    if (type === 'city') return '🏙️';
+    if (type === 'person') return '👤';
+    if (type === 'folder') return '📁';
+    return '🔍';
+  }
+
+  function renderSuggestions(items) {
+    suggestions = items;
+    activeIdx = -1;
+    if (!items.length) { hideSuggestions(); return; }
+    dropdown.innerHTML = items.map((s, i) =>
+      `<div class="suggest-item" data-idx="${i}"><span class="sicon">${typeIcon(s.type)}</span>${escapeHtml(s.text)}</div>`
+    ).join('');
+    dropdown.classList.add('visible');
+    dropdown.querySelectorAll('.suggest-item').forEach(el => {
+      el.addEventListener('mousedown', e => {
+        e.preventDefault();
+        selectSuggestion(parseInt(el.dataset.idx));
+      });
+    });
+  }
+
+  function hideSuggestions() {
+    dropdown.classList.remove('visible');
+    dropdown.innerHTML = '';
+    activeIdx = -1;
+  }
+
+  function selectSuggestion(idx) {
+    if (suggestions[idx]) {
+      input.value = suggestions[idx].text;
+      hideSuggestions();
+      doSearch();
+    }
+  }
+
+  function updateActive() {
+    dropdown.querySelectorAll('.suggest-item').forEach((el, i) => {
+      el.classList.toggle('active', i === activeIdx);
+    });
+    if (activeIdx >= 0) {
+      dropdown.querySelectorAll('.suggest-item')[activeIdx]?.scrollIntoView({block:'nearest'});
+    }
+  }
+
+  async function fetchSuggestions(q) {
+    if (!q) { hideSuggestions(); return; }
+    dropdown.innerHTML = '<div class="suggest-loading">搜索中...</div>';
+    dropdown.classList.add('visible');
+    try {
+      const r = await apiFetch(`/search/suggest?q=${encodeURIComponent(q)}`);
+      const data = await r.json();
+      if (input.value.trim() === q) renderSuggestions(data.suggestions || []);
+    } catch(e) { hideSuggestions(); }
+  }
+
+  input.addEventListener('input', () => {
+    clearTimeout(debounceTimer);
+    const q = input.value.trim();
+    debounceTimer = setTimeout(() => fetchSuggestions(q), 200);
+  });
+
+  input.addEventListener('keydown', e => {
+    if (!dropdown.classList.contains('visible') || !suggestions.length) return;
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      activeIdx = Math.min(activeIdx + 1, suggestions.length - 1);
+      updateActive();
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      activeIdx = Math.max(activeIdx - 1, 0);
+      updateActive();
+    } else if (e.key === 'Enter' && activeIdx >= 0) {
+      e.preventDefault();
+      selectSuggestion(activeIdx);
+    } else if (e.key === 'Escape') {
+      hideSuggestions();
+    }
+  });
+
+  input.addEventListener('blur', () => setTimeout(hideSuggestions, 150));
+  input.addEventListener('focus', () => {
+    if (input.value.trim()) fetchSuggestions(input.value.trim());
+  });
+})();
+
+// ── Mobile Lightbox Swipe ────────────────────────────────
+(function(){
+  const lb = document.getElementById('lightbox');
+  let touchStartX = 0, touchStartY = 0, swiping = false;
+  lb.addEventListener('touchstart', e => {
+    if (e.target.closest('.lightbox-panel') || e.target.closest('video')) return;
+    touchStartX = e.touches[0].clientX;
+    touchStartY = e.touches[0].clientY;
+    swiping = true;
+  }, {passive: true});
+  lb.addEventListener('touchend', e => {
+    if (!swiping) return;
+    swiping = false;
+    const dx = e.changedTouches[0].clientX - touchStartX;
+    const dy = e.changedTouches[0].clientY - touchStartY;
+    if (Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy) * 1.5) {
+      if (dx < 0) lightboxNav(1);
+      else lightboxNav(-1);
+    }
+  }, {passive: true});
+})();
 
 document.getElementById('searchInput').addEventListener('keydown', e => {
   if (e.key === 'Enter') doSearch();
