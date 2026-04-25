@@ -1309,6 +1309,53 @@ def face_scan_status():
     return jsonify(_face_scan_state)
 
 
+# ── 人脸重新匹配 API ──────────────────────────────────────
+
+_face_rematch_state: dict = {"running": False, "matched": 0, "error": None, "details": {}}
+
+@app.route("/api/face_rematch", methods=["POST"])
+@require_auth
+def start_face_rematch():
+    """用已命名人物的 centroid 重新扫描所有未分配人脸，放宽阈值匹配"""
+    global _face_rematch_state
+    if _face_rematch_state["running"]:
+        return jsonify({"status": "already_running"})
+
+    data = request.get_json(silent=True) or {}
+    threshold = data.get("threshold", 0.68)
+    absorb_threshold = data.get("absorb_threshold", 0.72)
+    person_ids = data.get("person_ids", None)
+
+    _face_rematch_state = {"running": True, "matched": 0, "error": None, "details": {}}
+
+    def run_rematch():
+        global _face_rematch_state
+        try:
+            scripts_dir = str(Path(__file__).parent.parent / "scripts")
+            if scripts_dir not in sys.path:
+                sys.path.insert(0, scripts_dir)
+            from rematch_faces import rematch_faces
+            result = rematch_faces(DB_PATH, threshold=threshold,
+                                   absorb_threshold=absorb_threshold,
+                                   person_ids=person_ids)
+            _face_rematch_state["matched"] = result["matched"]
+            _face_rematch_state["details"] = result["details"]
+        except Exception as e:
+            _face_rematch_state["error"] = str(e)
+        finally:
+            _face_rematch_state["running"] = False
+
+    t = threading.Thread(target=run_rematch, daemon=True)
+    t.start()
+    return jsonify({"status": "started", "threshold": threshold})
+
+
+@app.route("/api/face_rematch/status", methods=["GET"])
+@require_auth
+def face_rematch_status():
+    return jsonify(_face_rematch_state)
+
+
 # ── 家庭成员 / Owner API ──────────────────────────────────
 
 @app.route("/api/owners")
