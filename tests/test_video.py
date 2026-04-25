@@ -16,8 +16,10 @@ def _insert_video(db, path):
 
 
 def _make_video_file():
-    """Create a temp .mp4 file in the cwd so is_safe_path passes."""
-    fd, path = tempfile.mkstemp(suffix='.mp4', dir=os.getcwd())
+    """Create a temp .mp4 file in the DB_PATH parent dir so is_safe_path passes."""
+    import backend.api_server as api_mod
+    target_dir = os.path.dirname(api_mod.DB_PATH) if api_mod.DB_PATH else os.getcwd()
+    fd, path = tempfile.mkstemp(suffix='.mp4', dir=target_dir)
     os.write(fd, b'\x00' * 4096)
     os.close(fd)
     return path

@@ -77,7 +77,7 @@ def init_face_tables(conn: sqlite3.Connection):
 
         CREATE INDEX IF NOT EXISTS idx_faces_photo   ON faces(photo_id);
         CREATE INDEX IF NOT EXISTS idx_faces_person  ON faces(person_id);
-        CREATE INDEX IF NOT EXISTS idx_faces_pid_photo ON faces(person_id, photo_id);  # 复合索引
+        CREATE INDEX IF NOT EXISTS idx_faces_pid_photo ON faces(person_id, photo_id);  -- 复合索引
     """)
     conn.commit()
 

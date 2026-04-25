@@ -477,6 +477,7 @@ def search():
     year = request.args.get("year", "")
     month = request.args.get("month", "")
     person_name = request.args.get("person", "")
+    owner = request.args.get("owner", "").strip()
     exclude_screenshots = request.args.get("exclude_screenshots", "1") == "1"
     exclude_duplicates = request.args.get("exclude_duplicates", "0") == "1"
     limit = min(int(request.args.get("limit", 50)), 200)
@@ -503,6 +504,10 @@ def search():
         conditions.append("p.is_screenshot = 0")
     if exclude_duplicates:
         conditions.append("p.is_duplicate = 0")
+
+    if owner:
+        conditions.append("p.owner = ?")
+        params.append(owner)
 
     if date_from:
         conditions.append("p.taken_at >= ?")
@@ -1304,6 +1309,37 @@ def face_scan_status():
     return jsonify(_face_scan_state)
 
 
+# ── 家庭成员 / Owner API ──────────────────────────────────
+
+@app.route("/api/owners")
+@require_auth
+def list_owners():
+    """列出所有照片 owner 及其统计"""
+    conn = get_db()
+    rows = conn.execute("""
+        SELECT owner, COUNT(*) as count
+        FROM photos WHERE owner IS NOT NULL
+        GROUP BY owner ORDER BY count DESC
+    """).fetchall()
+    conn.close()
+    # Owner 描述映射
+    owner_info = {
+        "halton": {"name": "Halton", "description": "Halton 的照片和手机备份"},
+        "lxn": {"name": "Lxn", "description": "Lxn 的照片"},
+        "shared": {"name": "共享", "description": "旧照片 / 共享相册"},
+    }
+    results = []
+    for r in rows:
+        info = owner_info.get(r["owner"], {"name": r["owner"], "description": ""})
+        results.append({
+            "owner": r["owner"],
+            "name": info["name"],
+            "description": info["description"],
+            "photo_count": r["count"],
+        })
+    return jsonify({"owners": results})
+
+
 # ── 健康检查 ──────────────────────────────────────────────
 
 @app.route("/api/health")
@@ -1520,12 +1556,12 @@ def is_safe_path(path, base_dirs=None):
         return False
     if base_dirs is None:
         # 仅允许照片数据库同目录及其子孙
-        parent = os.path.abspath(os.path.dirname(DB_PATH) if 'DB_PATH' in globals() and DB_PATH else '.')
+        parent = os.path.realpath(os.path.dirname(DB_PATH) if 'DB_PATH' in globals() and DB_PATH else '.')
         base_dirs = [parent]
     if isinstance(base_dirs, str):
         base_dirs = [base_dirs]
     for basedir in base_dirs:
-        abs_dir = os.path.abspath(basedir)
+        abs_dir = os.path.realpath(basedir)
         if real == abs_dir or real.startswith(abs_dir+os.sep):
             return True
     return False

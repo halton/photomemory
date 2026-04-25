@@ -32,7 +32,8 @@ CREATE TABLE IF NOT EXISTS photos (
     is_duplicate INTEGER DEFAULT 0,
     duplicate_group TEXT,
     indexed_at TEXT,
-    file_type TEXT DEFAULT 'image'
+    file_type TEXT DEFAULT 'image',
+    owner TEXT DEFAULT NULL
 )
 """
 
@@ -60,6 +61,8 @@ def app_with_db():
     auth_mw.ADMIN_TOKEN = 'test-admin-token'
 
     from backend.api_server import app
+    import backend.api_server as api_mod
+    api_mod.DB_PATH = db_path
     app.config['TESTING'] = True
 
     yield app
