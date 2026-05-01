@@ -76,8 +76,8 @@ VIDEO_EXTS = {'.mov', '.mp4', '.avi', '.mkv', '.m4v', '.3gp'}
 
 FRONTEND_DIR = os.path.join(os.path.dirname(__file__), "..", "frontend")
 app = Flask(__name__, static_folder=FRONTEND_DIR, static_url_path="/")
-# 限制 CORS 来源（生产环境应配置具体域名）
-CORS(app, origins=["http://localhost:*", "https://localhost:*"], supports_credentials=True)
+# CORS: 允许所有来源（认证通过 query params，不依赖 cookies）
+CORS(app, origins="*")
 
 # ── Performance monitoring middleware ──
 from flask import g
@@ -530,14 +530,14 @@ def search():
         conditions.append(f"p.path IN ({placeholders})")
         params.extend(list(person_photo_paths))
 
-    # 地点文本搜索（GPS城市字段，支持中文别名 + 拼音）
+    # 地点文本搜索（GPS城市字段，支持中文别名 + 拼音 + summary）
     if q and not person_name and not _is_person_query(q, c):
         search_terms = expand_search_terms(q)
         # 构建多词 OR 条件
         term_conditions = []
         for term in search_terms:
-            term_conditions.append("(p.gps_city LIKE ? OR p.filename LIKE ? OR p.directory LIKE ?)")
-            params.extend([f"%{term}%", f"%{term}%", f"%{term}%"])
+            term_conditions.append("(p.gps_city LIKE ? OR p.filename LIKE ? OR p.directory LIKE ? OR p.summary LIKE ? OR p.summary_en LIKE ?)")
+            params.extend([f"%{term}%", f"%{term}%", f"%{term}%", f"%{term}%", f"%{term}%"])
         conditions.append("(" + " OR ".join(term_conditions) + ")")
 
     where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
@@ -872,6 +872,67 @@ def update_person(person_id):
     conn.commit()
     conn.close()
     return jsonify({"ok": True})
+
+
+@app.route("/api/persons/merge", methods=["POST"])
+@require_auth
+def merge_persons():
+    """合并两个人物：将 source 的所有人脸转移到 target"""
+    data = request.get_json()
+    source_id = data.get("source_id")
+    target_id = data.get("target_id")
+    if not source_id or not target_id:
+        return jsonify({"error": "source_id and target_id required"}), 400
+    try:
+        source_id = int(source_id)
+        target_id = int(target_id)
+    except (TypeError, ValueError):
+        return jsonify({"error": "source_id and target_id must be integers"}), 400
+    if source_id == target_id:
+        return jsonify({"error": "cannot merge person with itself"}), 400
+
+    conn = get_db()
+    try:
+        # Verify both exist
+        source = conn.execute("SELECT id, name, face_count FROM persons WHERE id=?", (source_id,)).fetchone()
+        target = conn.execute("SELECT id, name, face_count FROM persons WHERE id=?", (target_id,)).fetchone()
+        if not source or not target:
+            return jsonify({"error": "person not found"}), 404
+
+        # Atomic merge within transaction
+        conn.execute("BEGIN IMMEDIATE")
+        conn.execute("UPDATE faces SET person_id=? WHERE person_id=?", (target_id, source_id))
+        conn.execute("DELETE FROM persons WHERE id=?", (source_id,))
+
+        # Authoritative face count
+        new_count = conn.execute(
+            "SELECT COUNT(*) FROM faces WHERE person_id=?", (target_id,)
+        ).fetchone()[0]
+
+        # Recompute centroid
+        face_rows = conn.execute(
+            "SELECT embedding FROM faces WHERE person_id=? AND embedding IS NOT NULL", (target_id,)
+        ).fetchall()
+
+        if face_rows:
+            import numpy as np
+            from sklearn.preprocessing import normalize as _normalize
+            embs = np.array([np.frombuffer(r[0], dtype=np.float32) for r in face_rows])
+            embs = _normalize(embs)
+            centroid = embs.mean(axis=0)
+            centroid = centroid / np.linalg.norm(centroid)
+            conn.execute("UPDATE persons SET face_count=?, embedding_centroid=?, updated_at=? WHERE id=?",
+                         (new_count, centroid.astype(np.float32).tobytes(), datetime.now().isoformat(), target_id))
+        else:
+            conn.execute("UPDATE persons SET face_count=?, updated_at=? WHERE id=?",
+                         (new_count, datetime.now().isoformat(), target_id))
+
+        conn.commit()
+        result = {"ok": True, "target_id": target_id, "new_face_count": new_count,
+                  "merged_from": {"id": source_id, "name": source["name"]}}
+        return jsonify(result)
+    finally:
+        conn.close()
 
 
 @app.route("/api/face_thumb/<int:face_id>")
