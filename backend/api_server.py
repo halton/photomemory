@@ -439,7 +439,7 @@ def get_favorites():
             "height": r["height"],
             "is_screenshot": bool(r["is_screenshot"]),
             "is_duplicate": bool(r["is_duplicate"]),
-            "dir_label": r["directory"],
+            "dir_label": r["dir_label"],
             "size": r["size"],
             "thumb_url": f"/api/thumb/{r['id']}",
             "original_url": f"/api/photo/{r['id']}",
@@ -536,7 +536,7 @@ def search():
         # 构建多词 OR 条件
         term_conditions = []
         for term in search_terms:
-            term_conditions.append("(p.gps_city LIKE ? OR p.filename LIKE ? OR p.directory LIKE ? OR p.summary LIKE ? OR p.summary_en LIKE ?)")
+            term_conditions.append("(p.gps_city LIKE ? OR p.filename LIKE ? OR p.dir_label LIKE ? OR p.summary LIKE ? OR p.summary_en LIKE ?)")
             params.extend([f"%{term}%", f"%{term}%", f"%{term}%", f"%{term}%", f"%{term}%"])
         conditions.append("(" + " OR ".join(term_conditions) + ")")
 
@@ -545,7 +545,7 @@ def search():
         SELECT p.id, p.path, p.filename, p.taken_at,
                p.gps_lat, p.gps_lon, p.gps_city,
                p.width, p.height, p.is_screenshot, p.is_duplicate,
-               p.directory, p.size
+               p.dir_label, p.size
         FROM photos p
         {where}
         ORDER BY p.taken_at DESC
@@ -583,7 +583,7 @@ def search():
             "is_duplicate": bool(r["is_duplicate"]),
             "is_video": Path(r["path"]).suffix.lower() in VIDEO_EXTS,
             "video_url": f"/api/video/{r['id']}" if Path(r["path"]).suffix.lower() in VIDEO_EXTS else None,
-            "dir_label": r["directory"],
+            "dir_label": r["dir_label"],
             "thumb_url": f"/api/thumb/{r['id']}",
             "original_url": f"/api/photo/{r['id']}",
             "is_favorite": r["id"] in fav_set
@@ -633,12 +633,12 @@ def search_suggest():
     # 目录建议 (escape LIKE wildcards)
     safe_q = q.replace("%", "\\%").replace("_", "\\_")
     dir_rows = conn.execute(
-        "SELECT DISTINCT directory FROM photos WHERE directory LIKE ? ESCAPE '\\' LIMIT 5",
+        "SELECT DISTINCT dir_label FROM photos WHERE dir_label LIKE ? ESCAPE '\\' LIMIT 5",
         (f"%{safe_q}%",)
     ).fetchall()
     for r in dir_rows:
-        if r["directory"]:
-            suggestions.append({"type": "folder", "text": r["directory"]})
+        if r["dir_label"]:
+            suggestions.append({"type": "folder", "text": r["dir_label"]})
 
     # 去重
     seen = set()
@@ -1082,7 +1082,7 @@ def photos_random():
             SELECT p.id, p.path, p.filename, p.taken_at,
                    p.gps_lat, p.gps_lon, p.gps_city,
                    p.width, p.height, p.is_screenshot, p.is_duplicate,
-                   p.directory, p.size
+                   p.dir_label, p.size
             FROM photos p
             ORDER BY RANDOM()
             LIMIT ?
@@ -1102,7 +1102,7 @@ def photos_random():
                 "height": r["height"],
                 "is_screenshot": bool(r["is_screenshot"]),
                 "is_duplicate": bool(r["is_duplicate"]),
-                "dir_label": r["directory"],
+                "dir_label": r["dir_label"],
                 "thumb_url": f"/api/thumb/{r['id']}",
                 "original_url": f"/api/photo/{r['id']}"
             })
