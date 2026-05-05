@@ -733,8 +733,10 @@
         </div>
       </div>
       <div class="stats-bar" id="statsBar">加载中...</div>
-      <div id="cleanupBar" style="display:none;padding:6px 16px;background:#141414;border-bottom:1px solid #222;gap:8px;display:none">
-</div>
+      <div id="cleanupBar" style="display:none;padding:6px 16px;background:#141414;border-bottom:1px solid #222;gap:8px">
+        <button id="btnCleanDup" onclick="cleanupDuplicates()" style="background:none;border:1px solid rgba(239,68,68,0.4);color:#ef4444;border-radius:6px;padding:4px 12px;cursor:pointer;font-size:12px">🗑️ 清理重复</button>
+        <button id="btnCleanSS" onclick="cleanupScreenshots()" style="background:none;border:1px solid rgba(239,68,68,0.4);color:#ef4444;border-radius:6px;padding:4px 12px;cursor:pointer;font-size:12px">🗑️ 清理截图</button>
+      </div>
 <!-- 多选操作浮动栏 -->
 <div id="multiSelectBar" class="multi-bar" style="display:none">
   <span class="multi-info" id="multiSelectedCount">已选 0 张</span>
@@ -754,9 +756,6 @@
     </div>
   </div>
 </div>
-        <button id="btnCleanDup" onclick="cleanupDuplicates()" style="background:none;border:1px solid rgba(239,68,68,0.4);color:#ef4444;border-radius:6px;padding:4px 12px;cursor:pointer;font-size:12px">🗑️ 清理重复</button>
-        <button id="btnCleanSS" onclick="cleanupScreenshots()" style="background:none;border:1px solid rgba(239,68,68,0.4);color:#ef4444;border-radius:6px;padding:4px 12px;cursor:pointer;font-size:12px">🗑️ 清理截图</button>
-      </div>
 
       <!-- Photos view -->
       <div id="photosView">
