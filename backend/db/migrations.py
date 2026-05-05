@@ -1,5 +1,4 @@
 # 数据库建表和迁移逻辑
-import sqlite3
 from backend.db.connection import get_db
 
 INIT_SCHEMA = """

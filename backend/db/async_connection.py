@@ -1,6 +1,7 @@
 import asyncio
+from typing import Any, List, Optional, Tuple
+
 import aiosqlite
-from typing import Optional, Any, Callable, List, Tuple
 
 # 全局异步数据库文件路径和连接池大小。默认池大小5，适合大多数API负载。
 _async_db_path: Optional[str] = None

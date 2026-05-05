@@ -1,5 +1,6 @@
 import sqlite3
-from backend.db_util import get_optimized_connection
+
+from backend.db_util import get_optimized_connection, set_sqlite_pragmas
 
 DB_PATH = None
 
@@ -14,7 +15,6 @@ def get_db():
     conn.row_factory = sqlite3.Row
     return conn
 
-from backend.db_util import set_sqlite_pragmas
 
 def close_db(conn):
     conn.close()

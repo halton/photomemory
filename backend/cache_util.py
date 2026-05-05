@@ -3,6 +3,7 @@ import time
 from functools import wraps
 from typing import Any, Callable
 
+
 class CacheEntry:
     def __init__(self, value: Any, expires_at: float):
         self.value = value

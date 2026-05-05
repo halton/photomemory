@@ -3,12 +3,12 @@ photos 相关后端路由模块。
 负责 /api/photos 等图片相关接口
 """
 
-from fastapi import APIRouter, Depends, Query
 from datetime import datetime
-from typing import List
+
+from fastapi import APIRouter, Depends, Query
+
 from backend.db import get_db
-from backend.cache_util import cached
-from backend.schemas.photos import ToggleFavoriteResponse, PhotoItem, FavoritesResponse
+from backend.schemas.photos import FavoritesResponse, PhotoItem, ToggleFavoriteResponse
 
 router = APIRouter()
 

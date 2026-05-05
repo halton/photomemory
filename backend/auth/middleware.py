@@ -2,9 +2,10 @@
 认证与鉴权中间件。
 包含 require_auth、require_admin 装饰器及认证主逻辑。
 """
-from functools import wraps
-from flask import request, jsonify
 import secrets
+from functools import wraps
+
+from flask import jsonify, request
 
 # 注意：以下变量需由业务文件显式导入并赋值初始化
 PAIRING_ENABLED = False

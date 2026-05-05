@@ -5,8 +5,9 @@ gps_backfill.py - 负责自动补齐 photos 表中缺失 gps_city 的记录。
 依赖 reverse_geocode，需提前 pip3 install reverse-geocode。
 """
 import os
-import sys
+
 import reverse_geocode
+
 from backend.db_util import get_optimized_connection
 
 

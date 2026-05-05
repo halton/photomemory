@@ -2,11 +2,13 @@
 Device Pairing 认证与设备管理。
 提取自 api_server.py，确保接口与原有逻辑一致。
 """
-import secrets
 import json
+import secrets
 from datetime import datetime
 from pathlib import Path
-from flask import request, jsonify
+
+from flask import request
+
 
 def load_devices(devices_file: Path) -> dict:
     """加载设备信息"""

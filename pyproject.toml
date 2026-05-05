@@ -1,0 +1,44 @@
+[project]
+name = "photomemory"
+version = "1.0.0"
+requires-python = ">=3.11"
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+exclude = [
+    "backend/api_server.py",  # Legacy Flask app — too many issues to fix at once
+    "backend/api_fastapi.py",  # In-migration file with necessary import side effects
+    "backend/chat_tools.py",
+    "scripts/",
+]
+
+[tool.ruff.lint]
+select = ["E", "W", "F", "I"]
+ignore = ["E501", "E402", "F403"]
+
+[tool.ruff.lint.per-file-ignores]
+"backend/db/__init__.py" = ["F401"]
+"backend/db/connection.py" = ["F401"]
+"backend/auth/__init__.py" = ["F401"]
+"backend/db/db_util.py" = ["F401"]
+"backend/services/chat_tools.py" = ["F401"]
+"backend/utils/cache_util.py" = ["F401"]
+
+[tool.mypy]
+python_version = "3.11"
+ignore_missing_imports = true
+no_strict_optional = true
+warn_return_any = false
+warn_unused_configs = true
+explicit_package_bases = true
+exclude = [
+    "backend/api_server\\.py",
+    "backend/chat_tools\\.py",
+    "backend/db/async_connection\\.py",
+    "scripts/",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"

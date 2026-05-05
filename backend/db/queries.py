@@ -1,5 +1,4 @@
 # 通用数据库查询辅助函数
-import sqlite3
 
 def fetch_one(conn, sql, params=()):
     cur = conn.cursor()

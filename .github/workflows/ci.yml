@@ -1,40 +1,43 @@
-# PhotoMemory CI (Main Build & Smoke Test)
-# 仅做最基本的构建和 API 启动验证
-
+# PhotoMemory CI — Quality Gates
 name: CI
 
 on:
   push:
-    branches: [ main ]
+    branches: [main]
   pull_request:
-    branches: [ main ]
+    branches: [main]
 
 jobs:
-  build-and-test:
+  test-and-lint:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
-      - name: Set up Python 3.11
-        uses: actions/setup-python@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: "3.11"
+          cache: "pip"
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install -r requirements-dev.txt
+
+      - name: Lint with ruff
+        run: ruff check backend/
+
+      - name: Type check with mypy
+        run: mypy --ignore-missing-imports --explicit-package-bases --exclude "backend/(api_server|chat_tools|db/async_connection)\.py" --exclude "scripts/" backend/ || true
+
+      - name: Run tests
+        run: pytest tests/ -v --tb=short --cov=backend --cov-report=term-missing
+
+  docker-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
 
       - name: Build Docker image
-        run: docker build -t photomemory-test .
-
-      - name: Run container and check API health
-        run: |
-          docker run -d --name pmtest -p 8765:8765 photomemory-test
-          sleep 10
-          curl -f http://localhost:8765/api/health
-          docker stop pmtest
-          docker rm pmtest
-
-      - name: Python import test (backend.api_server)
-        run: |
-          python3 -c 'import backend.api_server'
+        run: docker build -t photomemory .

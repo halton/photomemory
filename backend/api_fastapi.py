@@ -123,9 +123,6 @@ async def reset_auth_page():
     """
     return Response(content=html, media_type="text/html")
 
-from fastapi.staticfiles import StaticFiles
-app.mount("", StaticFiles(directory=FRONTEND_DIR, html=True), name="static")
-
 # 以下 API 路由只做示意, 实际路由可逐步迁移
 @app.get("/api/health")
 async def health():
@@ -197,6 +194,10 @@ async def get_favorites(limit: int = 50, offset: int = 0):
         return FavoritesResponse(results=results, total=total, limit=limit, offset=offset)
 
 # TODO: 继续迁移 /api 相关路由和依赖
+
+# Static files mount MUST be last — it catches all unmatched routes
+from fastapi.staticfiles import StaticFiles
+app.mount("", StaticFiles(directory=FRONTEND_DIR, html=True), name="static")
 
 # CLI 启动（可选）
 if __name__ == "__main__":

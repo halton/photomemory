@@ -23,6 +23,14 @@ import time
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
 
+try:
+    from tqdm import tqdm
+    HAS_TQDM = True
+except ImportError:
+    HAS_TQDM = False
+
+from typing import Optional, Tuple
+
 VIDEO_EXTS = {".mov", ".mp4", ".avi", ".mkv", ".m4v", ".3gp", ".wmv", ".flv", ".webm", ".ts", ".mts"}
 DEFAULT_SIZE = 300
 
@@ -54,7 +62,7 @@ FFMPEG = find_ffmpeg()
 FFPROBE = find_ffprobe()
 
 
-def get_video_duration(path: str) -> float | None:
+def get_video_duration(path: str) -> Optional[float]:
     """用 ffprobe 获取视频时长（秒），失败返回 None。"""
     if not FFPROBE:
         return None
@@ -71,7 +79,7 @@ def get_video_duration(path: str) -> float | None:
     return None
 
 
-def generate_thumbnail(path: str, size: int, cache_file: str) -> tuple[bool, str]:
+def generate_thumbnail(path: str, size: int, cache_file: str) -> Tuple[bool, str]:
     """
     为单个视频生成缩略图，取中间帧。
     返回 (success, message)。
@@ -123,7 +131,7 @@ def generate_thumbnail(path: str, size: int, cache_file: str) -> tuple[bool, str
                 pass
 
 
-def process_one(args: tuple) -> tuple[int, bool, str]:
+def process_one(args: tuple) -> Tuple[int, bool, str]:
     """Worker function: (photo_id, path, size, cache_file) -> (photo_id, success, msg)"""
     photo_id, path, size, cache_file = args
     ok, msg = generate_thumbnail(path, size, cache_file)
@@ -164,9 +172,11 @@ def main():
 
     # 查询所有视频
     conn = sqlite3.connect(str(db_path))
+    conn.execute("PRAGMA busy_timeout = 5000")
     conn.row_factory = sqlite3.Row
-    ext_conditions = " OR ".join(f"LOWER(path) LIKE '%{ext}'" for ext in VIDEO_EXTS)
-    rows = conn.execute(f"SELECT id, path FROM photos WHERE {ext_conditions}").fetchall()
+    conditions = " OR ".join("LOWER(path) LIKE ?" for _ in VIDEO_EXTS)
+    params = [f"%{ext}" for ext in VIDEO_EXTS]
+    rows = conn.execute(f"SELECT id, path FROM photos WHERE {conditions}", params).fetchall()
     log.info(f"数据库中共 {len(rows)} 个视频文件")
 
     # 筛选需要生成缩略图的
@@ -203,20 +213,44 @@ def main():
 
     with ProcessPoolExecutor(max_workers=args.workers) as pool:
         futures = {pool.submit(process_one, t): t for t in tasks}
+        if HAS_TQDM:
+            pbar = tqdm(total=len(tasks), desc="生成缩略图", unit="video",
+                        bar_format="{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}]")
         for i, fut in enumerate(as_completed(futures), 1):
-            photo_id, ok, msg = fut.result()
+            try:
+                photo_id, ok, msg = fut.result()
+            except Exception as e:
+                fail_count += 1
+                log.warning(f"  FAIL (worker crash): {e}")
+                if HAS_TQDM:
+                    pbar.update(1)
+                    pbar.set_postfix(ok=len(success_ids), fail=fail_count)
+                continue
             if ok:
                 success_ids.append(photo_id)
             else:
                 fail_count += 1
                 log.warning(f"  FAIL id={photo_id}: {msg}")
-            if i % 100 == 0 or i == len(tasks):
+            if HAS_TQDM:
+                pbar.update(1)
+                pbar.set_postfix(ok=len(success_ids), fail=fail_count)
+            elif i % 100 == 0 or i == len(tasks):
                 elapsed = time.time() - t0
                 rate = i / elapsed if elapsed > 0 else 0
                 log.info(f"  进度: {i}/{len(tasks)} ({rate:.1f}/s) 成功={len(success_ids)} 失败={fail_count}")
+        if HAS_TQDM:
+            pbar.close()
 
     elapsed = time.time() - t0
-    log.info(f"生成完毕: 成功={len(success_ids)}, 失败={fail_count}, 耗时={elapsed:.1f}s")
+    log.info("")
+    log.info("=" * 50)
+    log.info("📊 批量缩略图生成完毕")
+    log.info(f"  ✅ 成功: {len(success_ids)}")
+    log.info(f"  ❌ 失败: {fail_count}")
+    log.info(f"  ⏭️  跳过(已有): {skipped}")
+    log.info(f"  📁 文件缺失: {missing_file}")
+    log.info(f"  ⏱️  耗时: {elapsed:.1f}s")
+    log.info("=" * 50)
 
     # 更新数据库: 添加 has_thumbnail 列（如不存在）并标记
     if success_ids:
@@ -238,7 +272,8 @@ def main():
                 batch,
             )
         # 同时标记之前已有缩略图的（skipped 的那些）
-        # 重新扫描已有缩略图的 video IDs
+        success_set = set(success_ids)
+        skipped_ids = []
         for row in rows:
             photo_id = row["id"]
             path = row["path"]
@@ -249,13 +284,24 @@ def main():
             except Exception:
                 mtime = 0
             cache_file = cache_dir / f"v_{photo_id}_{args.size}_{mtime}.jpg"
-            if cache_file.exists() and photo_id not in success_ids:
-                cursor.execute("UPDATE photos SET has_thumbnail = 1 WHERE id = ?", (photo_id,))
+            if cache_file.exists() and photo_id not in success_set:
+                skipped_ids.append(photo_id)
+
+        for i in range(0, len(skipped_ids), batch_size):
+            batch = skipped_ids[i : i + batch_size]
+            placeholders = ",".join("?" * len(batch))
+            cursor.execute(
+                f"UPDATE photos SET has_thumbnail = 1 WHERE id IN ({placeholders})",
+                batch,
+            )
 
         conn.commit()
         log.info("数据库 has_thumbnail 已更新")
 
-    conn.close()
+    try:
+        conn.close()
+    except Exception:
+        pass
     log.info("全部完成 ✓")
 
 

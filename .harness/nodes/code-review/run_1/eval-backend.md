@@ -1,56 +1,81 @@
-# Backend Review
+# Code Review: recluster_faces.py + merge_persons endpoint
 
-## Scores
+## scripts/recluster_faces.py
 
-| Dimension | Score | Notes |
-|-----------|-------|-------|
-| Security | 4/5 | LIKE injection fixed; PATCH uses parameterized queries; minor input validation gaps |
-| Performance | 3/5 | Ring buffer not thread-safe; middleware always runs |
-| Test Quality | 4/5 | Good coverage of happy + error paths; some assertions too lenient |
-| Code Quality | 3/5 | Inconsistent connection management; f-string SQL construction pattern |
+### 🔴 No transaction wrapping — partial writes on failure
 
-## Findings
+The script does multiple `conn.execute()` calls between `commit()`s. If it crashes mid-way through Step 3 (e.g., after updating some faces but before updating the centroid), the DB is left in an inconsistent state with `face_count` / centroid out of sync with actual faces.
 
-### Security
+**Fix:** Wrap each logical unit (Steps 3 and 4) in explicit `BEGIN`/`COMMIT` or use `with conn:` context manager.
 
-- 🔵 **PATCH endpoint accepts arbitrary string lengths for `name`/`description`** — No length validation on input fields. A malicious client could send megabytes in `name`. Add `if len(data.get("name","")) > 255: abort(400)`.
+### 🔴 Full distance matrix materialised in memory (O(n²))
 
-- 🟡 **`cover_photo_id` not validated as belonging to the album** — PATCH accepts any integer for `cover_photo_id` without checking it exists or belongs to the album. Could reference photos the user shouldn't access.
+Line 92-95: `embeddings @ embeddings.T` creates an N×N float64 matrix. With 50k unassigned faces, that's ~18 GB. No guard or chunking.
 
-- 🔵 **Perf stats endpoint leaks query parameters** — `_perf_ring` stores `request.args.get("q", "")` which could contain user search terms. The `/api/perf/stats` endpoint exposes these to any authenticated user.
+**Fix:** Add a sanity check / chunked computation, or use sklearn's `NearestNeighbors` with ball-tree for cosine.
 
-- ✅ **LIKE wildcard escaping done correctly** — `safe_q` properly escapes `%` and `_` with `ESCAPE '\'`. Good fix.
+### 🟡 face_count uses cached sum instead of COUNT(*)
 
-- ✅ **PATCH uses parameterized queries** — No SQL injection risk; the f-string only interpolates column names from a hardcoded allowlist (`name=?`, `description=?`, `cover_photo_id=?`), not user input.
+Line 901 in merge endpoint and line 163 in recluster: `new_count` is set from `len(face_rows)` which queries only `embedding IS NOT NULL`. If any faces lack embeddings, `face_count` will drift from reality.
 
-### Performance
+**Fix:** Use `SELECT COUNT(*) FROM faces WHERE person_id=?` for the authoritative count.
 
-- 🔴 **`deque` is not thread-safe for iteration** — `_perf_ring` is a `deque(maxlen=100)` shared across requests. While `deque.append` is thread-safe in CPython, iterating over it in `perf_stats` (`[e for e in _perf_ring ...]`) can raise `RuntimeError` if the deque mutates mid-iteration. Use `list(_perf_ring)` to snapshot, or add a `threading.Lock`.
+### 🟡 `last_insert_rowid()` is fragile
 
-- 🟡 **Middleware runs on every request including static files** — `before_request`/`after_request` hooks fire for all routes including static asset serving. Add a path filter (e.g., skip if `request.path` doesn't start with `/api/`).
+Line 175: Separate `SELECT last_insert_rowid()` call. If `get_optimized_connection` enables WAL with shared cache or triggers fire inserts, this can return a wrong ID. Use `cursor.lastrowid` instead.
 
-- 🟡 **Health check now runs a `COUNT(*)` on photos table** — On large databases this is a full table scan. Use `SELECT 1 FROM photos LIMIT 1` instead to verify connectivity without scanning.
+### 🔵 Connection never closed on exception
 
-### Test Quality
+Line 67-281: If any exception is raised, `conn.close()` is never called. Use a `try/finally` or context manager.
 
-- 🟡 **`test_city_suggestion` assertion is too loose** — `assert "city" in types or "folder" in types` will pass even if the feature is broken and returns unrelated folder matches. Test should assert on the specific expected suggestion text.
+### 🔵 `import sys, os` style
 
-- 🟡 **`test_directory_suggestion` assumes seed data has `/test` directories** — If seed data changes, the test silently breaks. Should insert known test data or document seed data dependency.
+Line 21: PEP 8 prefers separate import statements.
 
-- 🔵 **Video tests don't clean up on assertion failure before `finally`** — This is actually fine since `finally` always runs, but `_make_video_file` uses `os.getcwd()` which is fragile if tests change working directory.
+---
 
-- ✅ **PATCH tests cover all key paths** — rename, description, empty update (400), nonexistent (404), cover update. Good edge case coverage.
+## backend/api_server.py — `merge_persons()`
 
-- ✅ **LIKE wildcard safety test is valuable** — `test_like_wildcards_safe` directly tests the security fix. Good practice.
+### 🔴 No transaction — race condition between move and delete
 
-### Code Quality
+Lines 898-921: If a concurrent request assigns new faces to `source_id` between the `UPDATE faces` and `DELETE FROM persons`, those faces become orphaned (pointing to a deleted person). The entire merge must be atomic.
 
-- 🟡 **`conn.close()` called inconsistently in PATCH handler** — If `conn.execute` on the UPDATE throws, `conn.close()` is never called. Use `try/finally` or context manager. Same pattern exists in the health check (though there `conn.close()` before return is at least present).
+**Fix:** Wrap in a single transaction with `BEGIN IMMEDIATE`.
 
-- 🔵 **Duplicate `safe_q` assignment** — `safe_q = q.replace(...)` is computed twice identically in `search_suggest` (lines for person and directory suggestions). Compute once before both queries.
+### 🟡 `new_count` computed from stale cached values, not actual DB
 
-- 🔵 **Import placement** — `from flask import g` and `from collections import deque` are at module level mid-file rather than at the top with other imports. Move to top for consistency.
+Line 901: `new_count = source["face_count"] + target["face_count"]`. If `face_count` was stale (e.g., faces were deleted concurrently), this is wrong. Should use `SELECT COUNT(*) FROM faces WHERE person_id=?` after the move.
+
+### 🟡 `import numpy` inside request handler
+
+Line 908-909: Importing numpy/sklearn on every merge request adds ~200ms cold-start latency per worker. Move to module-level.
+
+### 🟡 No idempotency guard
+
+Calling merge twice with same `source_id` after the first succeeds returns 404 (source deleted). This is acceptable but undocumented. A client retry could confuse error handling. Consider returning 200 with a "already merged" note if source doesn't exist but target does.
+
+### 🔵 Missing input type validation
+
+Lines 882-883: `source_id` and `target_id` are used directly from JSON without `int()` cast. If a client sends a string, the SQL may behave unexpectedly (SQLite is permissive but comparison semantics differ).
+
+### 🔵 conn.close() not in finally block
+
+Line 926: If centroid computation raises (e.g., corrupt embedding blob), connection leaks.
+
+---
 
 ## Summary
 
-Solid feature additions. The LIKE escaping fix and parameterized PATCH queries show good security awareness. Main concerns: the ring buffer needs thread-safe iteration (🔴), connection management should use `try/finally` throughout, and the perf middleware should skip non-API routes. Tests are meaningful and cover key edge cases, though a couple of assertions could be tighter. Overall a good changeset that needs one critical fix (deque iteration) and a few quality improvements before merge.
+| Area | Issues |
+|------|--------|
+| DB safety | 🔴×2 (no transactions in both files) |
+| Memory | 🔴×1 (O(n²) distance matrix) |
+| Correctness | 🟡×3 (stale counts, lastrowid, imports) |
+| API design | 🟡×1 (idempotency) |
+| Resource mgmt | 🔵×2 (connection leaks) |
+
+---
+
+## VERDICT: ITERATE
+
+The transaction safety issues in both files are real data-corruption risks under concurrent access. The O(n²) memory issue will OOM on any non-trivial photo library. Fix the 🔴s and re-submit.

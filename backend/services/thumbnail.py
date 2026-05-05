@@ -1,12 +1,13 @@
 """
 thumbnail.py  - 缩略图与视频缩略图服务。用于图片/视频小图生成、缓存、占位图。
 """
-import os
 import io
-import tempfile
+import os
 import subprocess
-from pathlib import Path
+import tempfile
+
 from PIL import Image, ImageOps
+
 
 def generate_image_thumbnail(path, size):
     """

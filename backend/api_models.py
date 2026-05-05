@@ -1,8 +1,10 @@
 """
 Pydantic 请求/响应模型（首批仅迁移收藏相关）
 """
-from pydantic import BaseModel, Field
 from typing import List, Optional
+
+from pydantic import BaseModel
+
 
 class FavoriteToggleResponse(BaseModel):
     favorited: bool
